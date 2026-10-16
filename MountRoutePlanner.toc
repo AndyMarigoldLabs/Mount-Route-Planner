@@ -70,8 +70,10 @@ Data\MRP_UnlockNetherwing.lua
 Data\MRP_UnlockTournament.lua
 Data\MRP_UnlockDailies.lua
 Data\MRP_ChampionDailies.lua
+Data\MRP_HodirDailies.lua
 MRP_UnlockRouting.lua
 MRP_ChampionSeals.lua
+MRP_HodirReputation.lua
 MRP_Update.lua
 
 MRP_Filter.lua

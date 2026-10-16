@@ -18,6 +18,7 @@ if not MRPData.Internal then return end
 ---@field id number|string? quest/item ID or stable chain key
 ---@field count number? carried item quantity (item requirements)
 ---@field checkOnly boolean? terminal quest flag with no authored action in this graph
+---@field allowActive boolean? character quest may be on the log or completed (accept-before-child dependencies)
 ---@field name string? fallback quest name
 ---@field scope "character"|"account"? quest completion scope (defaults to character)
 ---@field factionID number? reputation faction ID
@@ -36,7 +37,7 @@ if not MRPData.Internal then return end
 ---@field scope "character"|"account"? defaults to character
 ---@field faction "Alliance"|"Horde"? omit for both
 ---@field requires AcquisitionRequirement? dependency gate for this quest
----@field progress AcquisitionRequirement? gathering gate for an accepted quest
+---@field progress AcquisitionRequirement? gathering gate or child quest/chain needed to finish an accepted quest
 ---@field waitMessage string? explains how to progress when gathering is incomplete
 ---@field accept QuestLocation? overrides the top-level quest-giver coordinates
 ---@field objective QuestLocation? fallback when Blizzard has no active waypoint
@@ -47,17 +48,21 @@ if not MRPData.Internal then return end
 ---@field dailyGroup string? runtime visit to check the NPC's actual daily offers
 ---@field dailyResetAt number? server reset boundary attached to a runtime daily step
 ---@field championSeals boolean? controlled by the independent Champion's Seal farming opt-in
+---@field hodirReputation boolean? controlled by the independent Sons of Hodir farming opt-in
+---@field objectID number? object to interact with for a runtime daily offer check
 
 ---@class DailyQuestGroup : QuestLocation
 ---@field id string stable group key
 ---@field name string quest giver or daily group label
----@field npcID number stable quest-giver identity
+---@field npcID number? NPC giver identity; exactly one of npcID/objectID is required
+---@field objectID number? game object giver identity
 ---@field evidence string reviewed source URL
 ---@field quests UnlockQuest[] verified candidates, not assumed simultaneous offers
 ---@field faction "Alliance"|"Horde"? omit for both
 ---@field requires AcquisitionRequirement? eligibility gate (does not initiate this path)
 ---@field factionRequirements table<string, AcquisitionRequirement>? character-faction gates for shared neutral quest IDs
 ---@field championSeals boolean? daily group contributing to the selected mount purchase budget
+---@field hodirReputation boolean? daily group contributing to the selected mammoth reputation target
 ---@field prepare AcquisitionRequirement? one-time setup path after the eligibility gate
 ---@field rotation boolean? at most one alternative may be available/completed per reset
 ---@field note string? daily progress instructions

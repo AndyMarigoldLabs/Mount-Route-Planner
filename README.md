@@ -11,6 +11,9 @@ Enable **Farm Champion's Seals for selected mounts** or run `/mrp championseals 
 to route available Tournament dailies until your currency balance covers the
 selected mount purchases. This independent option defaults to off, shares daily
 stops across mounts, and updates the budget after purchases and collection changes.
+Enable **Farm Sons of Hodir reputation for selected mammoths** or run `/mrp hodir on`
+to route Hodir dailies and their setup quests until Revered or Exalted, depending
+on the selected mammoths. This separate option also defaults to off per character.
 See [prerequisite routing](docs/prerequisites.md) for coverage, testing and local
 build instructions.
 

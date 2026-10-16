@@ -49,12 +49,20 @@ function Prerequisites:Evaluate(requirement, depth)
         if type(count) ~= "number" then return nil end
         return count >= requirement.count
     elseif requirement.type == "quest" then
+        if requirement.allowActive then
+            if not validID(requirement.id) or requirement.scope ~= "character" then return nil end
+            if C_QuestLog and C_QuestLog.IsOnQuest and C_QuestLog.IsOnQuest(requirement.id) then return true end
+            local done = self:IsQuestComplete(requirement.id, "character")
+            if done == true then return true end
+            if not (C_QuestLog and C_QuestLog.IsOnQuest) then return nil end
+            return done
+        end
         return self:IsQuestComplete(requirement.id, requirement.scope)
     elseif requirement.type == "reputation" then
         if not validID(requirement.factionID) or not validID(requirement.standing) or requirement.standing > 8 then return nil end
-        if not (C_Reputation and C_Reputation.GetFactionDataByID) then return nil end
-        local data = C_Reputation.GetFactionDataByID(requirement.factionID)
-        return data ~= nil and data.currentStanding ~= nil and data.currentStanding >= requirement.standing
+        local rank = MRP.Util.GetReputationRank(requirement.factionID)
+        if rank == nil then return nil end
+        return rank >= requirement.standing
     end
     return nil
 end
@@ -76,6 +84,7 @@ function Prerequisites:Describe(requirement, depth)
     elseif requirement.type == "item" and validID(requirement.id) and validID(requirement.count) then
         return string.format(L["Collect %d of item %d."], requirement.count, requirement.id)
     elseif requirement.type == "quest" and validID(requirement.id) then
+        if requirement.allowActive then return string.format(L["Accept %s (%d)."], self:GetQuestName(requirement), requirement.id) end
         return string.format(L["Complete %s (%d)."], self:GetQuestName(requirement), requirement.id)
     elseif requirement.type == "reputation" and validID(requirement.factionID) and validID(requirement.standing) then
         return MRP.Core:GetConditionMessage("rep_" .. requirement.factionID .. "_" .. requirement.standing)
@@ -236,6 +245,7 @@ function Prerequisites:ExpandSteps(steps)
     self:SyncDailyReset()
     if self.PrepareWaveContext then self:PrepareWaveContext(steps) end
     self:PrepareChampionBudget(steps)
+    self:PrepareHodirTarget(steps)
     local result, quests, diagnostics = {}, {}, {}
     for _, step in ipairs(steps) do
         local available = {}
@@ -330,6 +340,8 @@ function Prerequisites:SetEnabled(enabled)
 end
 
 function Prerequisites:PrintStatus()
+    local hodir = self:GetHodirTargetMessage()
+    if hodir then print("|cffffcc00[MRP]|r " .. hodir) end
     local budget = self:GetChampionBudgetMessage()
     if budget then print("|cffffcc00[MRP]|r " .. budget) end
     local count = 0

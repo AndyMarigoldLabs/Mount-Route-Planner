@@ -61,6 +61,7 @@ function P:ValidateRegistry()
             stack[child] = nil
         elseif req.type == "quest" then
             assert(validID(req.id) and (req.scope == "character" or req.scope == "account"), "Invalid quest scope/ID")
+            assert(req.allowActive == nil or (type(req.allowActive) == "boolean" and req.scope == "character"), "Invalid active quest gate")
             local node = chain.nodes[key(req)]
             if node then
                 assert(not stack[node], "Quest dependency cycle")
@@ -98,7 +99,8 @@ function P:ValidateRegistry()
     for id, group in pairs(self.dailyGroups or {}) do
         local ok, err = pcall(function()
             assert(type(group.evidence) == "string" and group.evidence ~= "", "Missing daily evidence")
-            assert(validID(group.npcID) and location(group), "Invalid daily giver")
+            assert(((validID(group.npcID) and group.objectID == nil) or (validID(group.objectID) and group.npcID == nil))
+                and location(group), "Invalid daily giver")
             assert(type(group.quests) == "table" and #group.quests > 0, "Empty daily group")
             for _, q in ipairs(group.quests) do
                 assert(validID(q.questID) and q.scope == "character" and q.daily, "Invalid daily quest")
@@ -160,6 +162,11 @@ function P:ResolveRequirement(req, chain, depth)
             if onQuest(quest.questID) and quest.progress and not (C_QuestLog.IsComplete and C_QuestLog.IsComplete(quest.questID)) then
                 local progress = self:Evaluate(quest.progress)
                 if progress ~= true then
+                    if quest.progress.type == "quest" or quest.progress.type == "chain" then
+                        local child = self:ResolveRequirement(quest.progress, chain, depth)
+                        child.active = true
+                        return child
+                    end
                     local dailies = progress == false and self.ResolveDailyProgress and self:ResolveDailyProgress(quest.progress, quest)
                     if dailies then
                         dailies.active = true

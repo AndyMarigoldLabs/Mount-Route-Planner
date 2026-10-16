@@ -6,7 +6,7 @@ local function onQuest(id) return C_QuestLog and C_QuestLog.IsOnQuest and C_Ques
 local function enabled()
     return WOW_PROJECT_ID == WOW_PROJECT_MAINLINE and MRP_CharacterSettings
         and ((MRP_CharacterSettings.includePrerequisiteQuests and MRP_CharacterSettings.includePrerequisiteDailies)
-            or MRP_CharacterSettings.includeChampionSealFarming)
+            or MRP_CharacterSettings.includeChampionSealFarming or MRP_CharacterSettings.includeHodirReputationFarming)
 end
 
 function P:RegisterDailyGroup(id, group)
@@ -17,6 +17,7 @@ function P:RegisterDailyGroup(id, group)
         assert(not self.dailyQuests[q.questID], "Duplicate daily quest")
         q.daily, q.scope, q.dailyGroupID = true, "character", id
         q.championSeals = group.championSeals
+        q.hodirReputation = group.hodirReputation
         q.mapID, q.x, q.y = group.mapID, group.x, group.y
         q.turnIn = { mapID = group.mapID, x = group.x, y = group.y }
         q.note = group.note
@@ -67,7 +68,10 @@ end
 
 function P:CanRetainCompletedQuest(q)
     if q.dailyGroup then return false end
-    if q.championSeals then
+    if q.hodirReputation then
+        local target = self.hodirTarget
+        if not self:HodirFarmingEnabled() or not target or not target.needed then return false end
+    elseif q.championSeals then
         local budget = self.championBudget
         if not self:ChampionFarmingEnabled() or not budget or not budget.remaining or budget.remaining <= 0 then return false end
     elseif not MRP_CharacterSettings.includePrerequisiteQuests or (q.daily and not MRP_CharacterSettings.includePrerequisiteDailies) then
@@ -80,15 +84,16 @@ end
 function P:CaptureDailyOffers()
     if not enabled() or not self.dailyResetAt or not (C_GossipInfo and C_GossipInfo.GetAvailableQuests) then return end
     local guid = UnitGUID and UnitGUID("npc")
-    local npc = guid and tonumber(guid:match("%-(%d+)%-%x+$"))
-    if not npc then return end
+    local giverID = guid and tonumber(guid:match("%-(%d+)%-%x+$"))
+    local kind = guid and guid:match("^(%a+)%-")
+    if not giverID or (kind ~= "Creature" and kind ~= "Vehicle" and kind ~= "GameObject") then return end
     local available = C_GossipInfo.GetAvailableQuests()
     if type(available) ~= "table" then return end
     local offered = {}
     for _, q in ipairs(available) do offered[q.questID] = true end
     self.dailyOffers = self.dailyOffers or {}
     for id, group in pairs(self.dailyGroups) do
-        if group.npcID == npc then
+        if (kind == "GameObject" and group.objectID == giverID) or (kind ~= "GameObject" and group.npcID == giverID) then
             local snapshot = { full = true }
             for _, q in ipairs(group.quests) do
                 if offered[q.questID] then
@@ -175,8 +180,10 @@ function P:ResolveDailyGroups(ids)
             end
             local requirement = group.factionRequirements and group.factionRequirements[UnitFactionGroup("player")] or group.requires
             local eligible = (not requirement and not group.factionRequirements) or self:Evaluate(requirement) == true
-                or (group.championSeals and offered)
-            if eligible and #active == 0 and group.prepare and self:Evaluate(group.prepare) ~= true then
+                or ((group.championSeals or group.hodirReputation) and offered)
+            local knownHodirAccess = group.hodirReputation and MRP_CharacterSettings.hodirDailyAccess
+                and MRP_CharacterSettings.hodirDailyAccess[id] == true
+            if eligible and #active == 0 and group.prepare and self:Evaluate(group.prepare) ~= true and not knownHodirAccess then
                 local prep = self:ResolveRequirement(group.prepare)
                 unknown = unknown or prep.state == "unknown"
                 for _, q in ipairs(prep.quests) do actions[#actions + 1] = q end
@@ -192,7 +199,8 @@ function P:ResolveDailyGroups(ids)
                 end
                 if unchecked and self.dailyResetAt then
                     actions[#actions + 1] = { dailyGroup = id, name = group.name,
-                        mapID = group.mapID, x = group.x, y = group.y, note = group.note, championSeals = group.championSeals }
+                        mapID = group.mapID, x = group.x, y = group.y, note = group.note, championSeals = group.championSeals,
+                        hodirReputation = group.hodirReputation, objectID = group.objectID }
                 end
             end
         elseif not group or group.invalid then

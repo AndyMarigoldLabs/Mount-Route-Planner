@@ -65,7 +65,11 @@ C_QuestLog = {
     GetTitleForQuestID = function() return nil end,
     GetNextWaypoint = function(id) if waypoints[id] then return unpack(waypoints[id]) end end,
 }
-C_Reputation = { GetFactionDataByID = function(id) return { name = "Faction " .. id, currentStanding = reputations[id] or standing } end }
+C_Reputation = { GetFactionDataByID = function(id)
+    local rank = reputations[id] or standing
+    local points = { -42000, -6000, -3000, 0, 3000, 9000, 21000, 42000 }
+    return { name = "Faction " .. id, reaction = rank, currentStanding = points[rank] + 100 }
+end }
 C_Item = { GetItemCount = function(id) return items[id] or 0 end }
 time = os.time
 C_UnitAuras = { GetPlayerAuraBySpellID = function() return nil end }
@@ -92,8 +96,10 @@ loadRuntime("Data/MRP_UnlockNetherwing.lua")
 loadRuntime("Data/MRP_UnlockTournament.lua")
 loadRuntime("Data/MRP_UnlockDailies.lua")
 loadRuntime("Data/MRP_ChampionDailies.lua")
+loadRuntime("Data/MRP_HodirDailies.lua")
 loadRuntime("MRP_UnlockRouting.lua")
 loadRuntime("MRP_ChampionSeals.lua")
+loadRuntime("MRP_HodirReputation.lua")
 MRP.Data = { VERSION = 1, STEPS = {}, OPEN_WORLD = {}, DUNGEONS = {}, RAIDS = {}, WORLD_BOSSES = {} }
 MRP.UI = { UpdateDisplay = function() displayUpdates = (displayUpdates or 0) + 1 end }
 loadRuntime("MRP_Filter.lua")
@@ -1435,6 +1441,270 @@ if arg[1] then
             F:Apply()
             equal(P.championBudget.count, 14); equal(P.championBudget.total, 1025)
             class = "PALADIN"; F:Apply(); equal(P.championBudget.count, 15); equal(P.championBudget.total, 1125)
+        end
+    end)
+end
+
+local function hodirSetup(side, prepared)
+    dailySetup("tournament"); P:SetDailiesEnabled(false); P:SetEnabled(false)
+    accepted = {}; faction = side or "Alliance"
+    unlocked(); standing = 5
+    MRP.Data.STEPS = { vendor }
+    if prepared ~= false then
+        for _, id in ipairs({ 12924, 12966, 12967, 12975, 12976, 12985, 12987, 13001 }) do completed[id] = true end
+    end
+    P:SetHodirFarmingEnabled(true)
+end
+local function hodirCount()
+    local count = 0
+    for _, step in ipairs(F.filteredSteps) do if step.prerequisiteQuest and step.prerequisiteQuest.hodirReputation then count = count + 1 end end
+    return count
+end
+local function hodirDetail(id)
+    detailQuest = id; frames[1].scripts.OnEvent(nil, "QUEST_DETAIL"); flush(); detailQuest = nil
+end
+
+test("Hodir farming defaults off, migrates off and runs independently of other opt-ins", function()
+    reset(); equal(MRP_CharacterSettings.includeHodirReputationFarming, false)
+    MRP_CharacterSettings.includeHodirReputationFarming = nil; MRP.Core:InitializeSettings()
+    equal(MRP_CharacterSettings.includeHodirReputationFarming, false)
+    hodirSetup(); equal(hodirCount(), 3)
+    equal(MRP_CharacterSettings.includePrerequisiteQuests, false)
+    equal(MRP_CharacterSettings.includePrerequisiteDailies, false)
+    equal(MRP_CharacterSettings.includeChampionSealFarming, false)
+    P:SetEnabled(false); equal(hodirCount(), 3); assert(P.dailyTimer)
+    local timer = P.dailyTimer; P:SetHodirFarmingEnabled(false)
+    equal(hodirCount(), 0); assert(timer.cancelled)
+end)
+
+test("both factions choose Revered for Ice Mammoth and Exalted for Grand Ice Mammoth", function()
+    for _, side in ipairs({ "Alliance", "Horde" }) do
+        hodirSetup(side); equal(P.hodirTarget.rank, 8); equal(P.hodirTarget.count, 2)
+        local ice, grand = side == "Alliance" and 259 or 258, side == "Alliance" and 289 or 288
+        for _, step in ipairs(F.filteredSteps) do equal(#step.mounts, 2) end
+        collected[grand] = true; F:Apply(); equal(P.hodirTarget.rank, 7); equal(P.hodirTarget.count, 1)
+        standing = 7; frames[1].scripts.OnEvent(nil, "UPDATE_FACTION"); flush()
+        equal(hodirCount(), 0); equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().mounts[1].id, ice)
+        collected[grand] = nil; F:Apply(); equal(P.hodirTarget.rank, 8); equal(hodirCount(), 6)
+        local purchases = 0
+        for _, step in ipairs(F.filteredSteps) do if step.source.type == "Vendor" then purchases = purchases + 1; equal(step.mounts[1].id, ice) end end
+        equal(purchases, 1)
+        standing = 8; frames[1].scripts.OnEvent(nil, "UPDATE_FACTION"); flush()
+        equal(hodirCount(), 0); equal(#F.filteredSteps, 1); equal(#F:GetCurrentStep().mounts, 2)
+    end
+end)
+
+test("Hodir targets deduplicate listings and exclude purchased but unlearned mammoths", function()
+    hodirSetup()
+    local duplicate = source(905, "Vendor", 32540, 43961); duplicate.mounts[1].id = 289
+    MRP.Data.STEPS[2] = duplicate; F:Apply()
+    equal(P.hodirTarget.rank, 8); equal(P.hodirTarget.count, 2); equal(hodirCount(), 3)
+    for _, step in ipairs(F.filteredSteps) do equal(#step.mounts, 2); assert(step.targetStepIDs[51] and step.targetStepIDs[905]) end
+    items[43961] = 1; frames[1].scripts.OnEvent(nil, "BAG_UPDATE_DELAYED"); flush()
+    equal(P.hodirTarget.rank, 7); equal(P.hodirTarget.count, 1)
+    items[43958] = 1; F:Apply(); equal(P.hodirTarget.rank, nil); equal(#F.filteredSteps, 0)
+end)
+
+test("Hodir farming disappears when filters or collected mounts remove its goals", function()
+    hodirSetup(); F:SetSourceType("Vendor", false); equal(hodirCount(), 0); equal(P.hodirTarget.count, 0)
+    F:SetSourceType("Vendor", true); equal(hodirCount(), 3)
+    collected[259], collected[289] = true, true; F:Apply(); equal(hodirCount(), 0)
+    equal(P.hodirTarget.rank, nil)
+end)
+
+test("Hodir opt-in preserves source restrictions, unknown gates and Classic behavior", function()
+    hodirSetup(); vendor.requirements = { type = "unsupported" }; F:Apply()
+    equal(hodirCount(), 0); equal(P.hodirTarget.count, 0)
+    vendor.requirements = nil; MRP.Data.OPEN_WORLD.Lillehoff.conditions = { "horde_only" }; F:Apply()
+    equal(hodirCount(), 0); equal(P.hodirTarget.count, 0)
+    MRP.Data.OPEN_WORLD.Lillehoff.conditions = nil
+    WOW_PROJECT_ID = 2; F:Apply(); equal(P.hodirTarget, nil); equal(hodirCount(), 0); WOW_PROJECT_ID = 1
+end)
+
+test("Hodir rank data must be available and valid before creating reputation errands", function()
+    hodirSetup(); local api = C_Reputation.GetFactionDataByID
+    for _, bad in ipairs({ false, "5", 0, 9, 5.5 }) do
+        C_Reputation.GetFactionDataByID = function() return { reaction = bad, currentStanding = 42000 } end
+        F:Apply(); equal(P.hodirTarget.standing, nil); equal(hodirCount(), 0)
+        assert(P:GetHodirTargetMessage():find("unavailable", 1, true))
+    end
+    C_Reputation.GetFactionDataByID = api; F:Apply(); equal(hodirCount(), 3)
+end)
+
+test("Hodir daily visits obey Neutral, Friendly, Honored and Revered gates", function()
+    hodirSetup()
+    for rank, count in pairs({ [4] = 2, [5] = 3, [6] = 5, [7] = 6, [8] = 0 }) do
+        standing = rank; F:Apply(); equal(hodirCount(), count)
+    end
+    equal(P.dailyQuests[13559], nil); equal(P.dailyQuests[13421], nil, "repeatable turn-ins are not dailies")
+end)
+
+test("Retail reputation ranks use reaction, never the point total in currentStanding", function()
+    hodirSetup(); local api = C_Reputation.GetFactionDataByID
+    MRP.Data.OPEN_WORLD.Lillehoff.conditions = { "rep_1119_7" }
+    C_Reputation.GetFactionDataByID = function() return { reaction = 5, currentStanding = 8999 } end
+    F:Apply(); equal(P.hodirTarget.standing, 5); equal(hodirCount(), 3)
+    equal(P:Evaluate(P.RequireReputation(1119, 7)), false)
+    equal(MRP.Util.GetStepConditions(vendor)[1].met, false)
+    C_Reputation.GetFactionDataByID = function() return { reaction = 8, currentStanding = 42000 } end
+    F:Apply(); equal(hodirCount(), 0); equal(#F.filteredSteps, 1)
+    equal(P:Evaluate(P.RequireReputation(1119, 8)), true)
+    equal(MRP.Util.GetStepConditions(vendor)[1].met, true)
+    C_Reputation.GetFactionDataByID = function() return { currentStanding = 42000 } end
+    equal(P:Evaluate(P.RequireReputation(1119, 7)), nil)
+    equal(MRP.Util.GetStepConditions(vendor)[1].met, false)
+    C_Reputation.GetFactionDataByID = api
+end)
+
+test("Hodir initial phasing remains character-specific and separate from reputation opt-in", function()
+    hodirSetup(nil, false); completed = {}; account[12915], account[12956] = true, true
+    F:Apply(); equal(#F.filteredSteps, 0)
+    assert(P.diagnostics[1].status.message:find("Unlock the Sons of Hodir", 1, true))
+    P:SetEnabled(true); equal(currentQuest(), 12843)
+    P:SetEnabled(false); standing = 8; F:Apply(); equal(#F.filteredSteps, 0, "Exalted cannot bypass phasing")
+end)
+
+test("Hodir anvil setup accepts the parent before child quests and turns it in afterward", function()
+    hodirSetup(nil, false); equal(#F.filteredSteps, 1); equal(currentQuest(), 12924)
+    accepted[12924] = true; frames[1].scripts.OnEvent(nil, "QUEST_ACCEPTED", 12924); flush()
+    equal(#F.filteredSteps, 1); equal(currentQuest(), 12966)
+    accepted[12924] = nil; frames[1].scripts.OnEvent(nil, "QUEST_REMOVED", 12924); flush()
+    equal(currentQuest(), 12924, "abandoning parent restores acceptance")
+    accepted[12924], accepted[12966] = true, true; F:Apply()
+    completed[12966] = true; turnIn(12966); equal(currentQuest(), 12967)
+    completed[12967], objectives[12924] = true, true; turnIn(12967)
+    local ids = questIDs(F.filteredSteps)
+    assert(ids[12924] and ids[12985]); assert(dailyChecks(F.filteredSteps)["storm.hodir.daily.cold"])
+    local _, phase = P:GetQuestDestination(P.chains["storm.hodir.alliance"].nodes["character:12924"])
+    equal(phase, "turnIn")
+    completed[12924] = true; turnIn(12924); assert(questIDs(F.filteredSteps)[12975])
+    completed[12975] = true; turnIn(12975); assert(questIDs(F.filteredSteps)[12976])
+    completed[12976], completed[12985] = true, true; F:Apply(); assert(questIDs(F.filteredSteps)[12987])
+    completed[12987] = true; F:Apply(); equal(hodirCount(), 3)
+    standing = 6; frames[1].scripts.OnEvent(nil, "UPDATE_FACTION"); flush()
+    assert(questIDs(F.filteredSteps)[13001]); assert(dailyChecks(F.filteredSteps)["storm.hodir.daily.spy"])
+    completed[13001] = true; F:Apply(); equal(hodirCount(), 5)
+    nextDay(); equal(hodirCount(), 5); assert(completed[12924] and completed[12967] and completed[13001])
+end)
+
+test("active-parent requirements never count account completion or persist fake completion", function()
+    hodirSetup(nil, false)
+    local req = P.chains["storm.hodir.anvil"].nodes["character:12966"].requires
+    account[12924] = true; equal(P:Evaluate(req), false)
+    accepted[12924] = true; equal(P:Evaluate(req), true); equal(P:IsQuestComplete(12924), false)
+    accepted[12924] = nil; equal(P:Evaluate(req), false)
+    req.scope = "account"; equal(P:Evaluate(req), nil); equal(P:ValidateRegistry(), false)
+    req.scope = "character"; equal(P:ValidateRegistry(), true)
+end)
+
+test("Hodir object details confirm real offers and route objective and turn-in phases", function()
+    hodirSetup(); hodirDetail(12981)
+    assert(questIDs(F.filteredSteps)[12981]); assert(not dailyChecks(F.filteredSteps)["storm.hodir.daily.cold"])
+    accepted[12981] = true; waypoints[12981] = { 120, 0.75, 0.5 }
+    frames[1].scripts.OnEvent(nil, "QUEST_ACCEPTED", 12981); flush()
+    local location, phase = P:GetQuestDestination(P.dailyQuests[12981]); equal(phase, "objective"); equal(location.x, 75)
+    objectives[12981], waypoints[12981] = true, nil
+    location, phase = P:GetQuestDestination(P.dailyQuests[12981]); equal(phase, "turnIn"); equal(location.x, 63.2)
+    turnIn(12981); assert(not questIDs(F.filteredSteps)[12981]); assert(not dailyChecks(F.filteredSteps)["storm.hodir.daily.cold"])
+    equal(MRP_CharacterSettings.prerequisiteDailyState.completed[12981], true)
+end)
+
+test("Hodir object gossip snapshots distinguish objects from NPCs and accept empty lists", function()
+    hodirSetup(); local guid = UnitGUID
+    UnitGUID = function() return "Creature-0-0-0-0-192071-0000000000" end
+    gossipQuests = { { questID = 12981 } }; frames[1].scripts.OnEvent(nil, "GOSSIP_SHOW"); flush()
+    assert(not questIDs(F.filteredSteps)[12981])
+    UnitGUID = function() return "GameObject-0-0-0-0-192071-0000000000" end
+    frames[1].scripts.OnEvent(nil, "GOSSIP_SHOW"); flush(); assert(questIDs(F.filteredSteps)[12981])
+    gossipQuests = {}; frames[1].scripts.OnEvent(nil, "GOSSIP_SHOW"); flush()
+    assert(not questIDs(F.filteredSteps)[12981]); assert(not dailyChecks(F.filteredSteps)["storm.hodir.daily.cold"])
+    UnitGUID = guid; nextDay(); assert(dailyChecks(F.filteredSteps)["storm.hodir.daily.cold"])
+end)
+
+test("observed Hodir daily access skips only its own setup across resets and reloads", function()
+    hodirSetup(nil, false); hodirDetail(12981)
+    assert(questIDs(F.filteredSteps)[12981]); equal(MRP_CharacterSettings.hodirDailyAccess["storm.hodir.daily.cold"], true)
+    equal(MRP_CharacterSettings.hodirDailyAccess["storm.hodir.daily.horn"], nil)
+    nextDay(); assert(dailyChecks(F.filteredSteps)["storm.hodir.daily.cold"])
+    assert(questIDs(F.filteredSteps)[12924], "other setup paths still need their own evidence")
+    P.dailyOffers, P.dailyResetAt = {}, nil; P:StartDailyResetWatch(); F:Apply()
+    assert(dailyChecks(F.filteredSteps)["storm.hodir.daily.cold"])
+end)
+
+test("available or accepted Hodir dailies take precedence over missing historical flags", function()
+    hodirSetup(nil, false); completed[12915], completed[12956] = nil, nil
+    accepted[12994] = true; F:Apply(); assert(questIDs(F.filteredSteps)[12994])
+    hodirDetail(13046); assert(questIDs(F.filteredSteps)[13046])
+    equal(#F.filteredSteps, 2); equal(P:IsQuestComplete(12915), false)
+end)
+
+test("Hodir daily completions expire at reset, with offline and reload recovery", function()
+    hodirSetup(); turnIn(12981); turnIn(12977); turnIn(13006)
+    equal(hodirCount(), 0); equal(P.hodirTarget.needed, true)
+    P.dailyOffers, P.dailyResetAt = {}, nil; P:StartDailyResetWatch(); F:Apply(); equal(hodirCount(), 0)
+    nextDay(); equal(hodirCount(), 3)
+    turnIn(12981); serverNow, serverReset = serverReset + 100000, serverReset + 172800
+    P.dailyOffers, P.dailyResetAt = {}, nil; P:StartDailyResetWatch(); F:Apply(); equal(hodirCount(), 3)
+    assert(completed[12987], "permanent setup survived resets")
+end)
+
+test("Hodir farming preserves carried quests and suppresses stale offers when reset data is missing", function()
+    hodirSetup(); hodirDetail(12981); accepted[12977], objectives[12977] = true, true
+    resetKnown = false; F:Apply(); equal(hodirCount(), 1); equal(currentQuest(), 12977)
+    local _, phase = P:GetQuestDestination(P.dailyQuests[12977]); equal(phase, "turnIn")
+    resetKnown = true; nextDay(); equal(hodirCount(), 3)
+    assert(questIDs(F.filteredSteps)[12977]); assert(not questIDs(F.filteredSteps)[12981])
+end)
+
+test("Hodir reputation targets advance only from actual reputation updates over multiple days", function()
+    hodirSetup(); collected[289] = true; standing = 6; F:Apply()
+    for day = 1, 2 do
+        for _, id in ipairs({ 12981, 12977, 13006, 12994, 13003 }) do turnIn(id) end
+        equal(P.hodirTarget.standing, 6); equal(hodirCount(), 0)
+        if day == 1 then nextDay(); equal(hodirCount(), 5) end
+    end
+    standing = 7; frames[1].scripts.OnEvent(nil, "UPDATE_FACTION"); flush()
+    equal(hodirCount(), 0); equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().source.type, "Vendor")
+    nextDay(); equal(hodirCount(), 0)
+end)
+
+test("reaching the Hodir target removes retained completed stops even with auto-advance off", function()
+    hodirSetup(); collected[289] = true; hodirDetail(12981)
+    for i, step in ipairs(F.filteredSteps) do if step.prerequisiteQuest.questID == 12981 then MRP_CharacterSettings.currentStep = i end end
+    MRP_CharacterSettings.autoAdvance = false; turnIn(12981); equal(currentQuest(), 12981)
+    standing = 7; frames[1].scripts.OnEvent(nil, "UPDATE_FACTION"); flush()
+    equal(hodirCount(), 0); equal(F:GetCurrentStep().source.type, "Vendor")
+end)
+
+test("Hodir rank and reset events defer in combat and coexist with Champion farming", function()
+    hodirSetup(); P:SetChampionFarmingEnabled(true); collected[289] = true; F:Apply()
+    combat = true; standing = 7; frames[1].scripts.OnEvent(nil, "UPDATE_FACTION"); flush()
+    equal(hodirCount(), 3); assert(P.refreshAfterCombat)
+    combat = false; frames[1].scripts.OnEvent(nil, "PLAYER_REGEN_ENABLED"); flush(); equal(hodirCount(), 0)
+    P:SetHodirFarmingEnabled(false); assert(P.dailyTimer)
+    P:SetChampionFarmingEnabled(false); equal(P.dailyTimer, nil)
+end)
+
+test("daily metadata validates object identities without accepting ambiguous giver IDs", function()
+    local group = P.dailyGroups["storm.hodir.daily.cold"]
+    group.npcID = 192071; equal(P:ValidateRegistry(), false); assert(group.invalid)
+    group.npcID = nil; local object = group.objectID; group.objectID = 0
+    equal(P:ValidateRegistry(), false); group.objectID = object; equal(P:ValidateRegistry(), true)
+end)
+
+if arg[1] then
+    test("published Lillehoff data selects each faction's correct reputation targets", function()
+        local data = { Internal = {} }
+        assert(loadfile(arg[1] .. "/Steps/Standard/MRPData_Steps.lua"))("MountRoutePlannerData", data)
+        assert(loadfile(arg[1] .. "/Mounts/Standard/MRPData_Mounts.lua"))("MountRoutePlannerData", data)
+        for _, side in ipairs({ "Alliance", "Horde" }) do
+            hodirSetup(side)
+            MRP.Data.STEPS, MRP.Data.OPEN_WORLD = data.Steps, data.openWorld
+            MRP.Data.DUNGEONS, MRP.Data.RAIDS, MRP.Data.WORLD_BOSSES = data.dungeons, data.raids, data.worldBosses
+            F:Apply(); equal(P.hodirTarget.rank, 8); equal(P.hodirTarget.count, 2); equal(hodirCount(), 3)
+            local grandID
+            for id, goal in pairs(P.hodirTarget.goals) do if goal.rank == 8 then grandID = id end end
+            assert(grandID); collected[grandID] = true; F:Apply(); equal(P.hodirTarget.rank, 7)
         end
     end)
 end

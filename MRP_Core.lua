@@ -816,6 +816,9 @@ function Core:InitializeSettings()
     if MRP_CharacterSettings.includeChampionSealFarming == nil then
         MRP_CharacterSettings.includeChampionSealFarming = false
     end
+    if MRP_CharacterSettings.includeHodirReputationFarming == nil then
+        MRP_CharacterSettings.includeHodirReputationFarming = false
+    end
 
     if MRP_CharacterSettings.currentStep == nil then
         MRP_CharacterSettings.currentStep = 1
@@ -1048,6 +1051,10 @@ function Core:HandleSlashCommand(msg)
         print(MRP_CharacterSettings.includePrerequisiteQuests and MRP_CharacterSettings.includePrerequisiteDailies
             and L["Unlock dailies are enabled."] or L["Unlock dailies are disabled."])
         MRP.Prerequisites:PrintStatus()
+    elseif cmd == "hodir" then
+        if arg1 == "on" or arg1 == "off" then MRP.Prerequisites:SetHodirFarmingEnabled(arg1 == "on") end
+        print(MRP.Prerequisites:HodirFarmingEnabled() and L["Sons of Hodir farming is enabled."] or L["Sons of Hodir farming is disabled."])
+        MRP.Prerequisites:PrintStatus()
     elseif cmd == "championseals" then
         if arg1 == "on" or arg1 == "off" then MRP.Prerequisites:SetChampionFarmingEnabled(arg1 == "on") end
         print(MRP.Prerequisites:ChampionFarmingEnabled() and L["Champion's Seal farming is enabled."] or L["Champion's Seal farming is disabled."])
@@ -1068,6 +1075,7 @@ function Core:HandleSlashCommand(msg)
         print(L[" - /mrp prerequisites on|off|status → Route unlock quests or list blocked mounts"])
         print(L[" - /mrp dailies on|off|status → Route Netherwing reputation and Tournament unlock seal dailies"])
         print(L[" - /mrp championseals on|off|status → Farm seals for selected Tournament mounts"])
+        print(L[" - /mrp hodir on|off|status → Farm Sons of Hodir reputation for selected mammoths"])
         print(L[" - /mrp updatedisplaydelayed <number> → Force update of the display after a delay (default: 0.25 seconds)"])
     end
 end

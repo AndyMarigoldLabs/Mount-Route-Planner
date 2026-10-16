@@ -84,6 +84,7 @@ local rewards = {
     [43961] = { faction = "Alliance", requirements = { type = "reputation", factionID = 1119, standing = 8 } },
     [44086] = { faction = "Horde", requirements = { type = "reputation", factionID = 1119, standing = 8 } },
 }
+P.hodirMounts = rewards
 
 P:RegisterBinding({ sourceType = "Vendor", npcID = 32540, source = lillehoff, rewards = rewards })
 P:RegisterBinding({ sourceType = "OpenWorld", itemID = 43962, source = { requirements = C("storm.gretta") } })

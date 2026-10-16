@@ -1130,7 +1130,9 @@ function UI:UpdateDisplay()
         local action = phase == "accept" and L["Accept"] or (phase == "turnIn" and L["Turn in"] or L["Complete objectives for"])
         local message
         if quest.dailyGroup then
-            message = string.format(L["Check today's available dailies: %s. Talk to the quest giver to update this route."], quest.name)
+            message = string.format(quest.objectID
+                and L["Check today's available dailies: %s. Interact with the object to update this route."]
+                or L["Check today's available dailies: %s. Talk to the quest giver to update this route."], quest.name)
         elseif quest.daily then
             message = string.format(L["%s daily: %s (%d)."], action, MRP.Prerequisites:GetQuestName(quest), quest.questID)
         else
@@ -1154,6 +1156,10 @@ function UI:UpdateDisplay()
         end
     end
 
+    local hodir = MRP.Prerequisites.hodirTarget
+    if hodir and ((step.prerequisiteQuest and step.prerequisiteQuest.hodirReputation) or hodir.selections[step.id]) then
+        frame.noteText:SetText((frame.noteText:GetText() or "") .. "\n" .. MRP.Prerequisites:GetHodirTargetMessage())
+    end
     local budget = MRP.Prerequisites.championBudget
     if budget and ((step.prerequisiteQuest and step.prerequisiteQuest.championSeals) or budget.selections[step.id]) then
         frame.noteText:SetText((frame.noteText:GetText() or "") .. "\n" .. MRP.Prerequisites:GetChampionBudgetMessage())

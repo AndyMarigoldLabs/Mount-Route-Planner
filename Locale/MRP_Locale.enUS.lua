@@ -299,6 +299,22 @@ for _, text in ipairs({
   "Earn Champion's Seals for your selected mounts. Choose and open a Champion's Purse when offered; unopened rewards are not spendable seals.",
 }) do MRP.L[text] = text end
 
+-- Sons of Hodir reputation farming and object quest givers.
+for _, text in ipairs({
+  "Farm Sons of Hodir reputation for selected mammoths",
+  "Route available Hodir dailies and their setup quests until Revered for Ice Mammoth or Exalted for Grand Ice Mammoth. Independent of other farming options; enable prerequisite chains for the initial faction unlock.",
+  "Sons of Hodir farming is enabled.",
+  "Sons of Hodir farming is disabled.",
+  " - /mrp hodir on|off|status → Farm Sons of Hodir reputation for selected mammoths",
+  "Sons of Hodir reputation is unavailable. Farming is paused until character reputation data loads.",
+  "No unpurchased Lillehoff mammoths match your filters.",
+  "Sons of Hodir target: %s for %d selected mammoths. Gold and vendor unlock requirements still apply.",
+  "Unlock the Sons of Hodir on this character first. Enable prerequisite quest routing to follow the Storm Peaks chain.",
+  "Earn Sons of Hodir reputation for the selected mammoths. Interact with this quest giver or object to check today's daily; follow the quest log for objectives.",
+  "Check today's available dailies: %s. Interact with the object to update this route.",
+  "Accept %s (%d).",
+}) do MRP.L[text] = text end
+
 setmetatable(MRP.L, {
   __index = function(t, k)
     rawset(t, k, k); return k;

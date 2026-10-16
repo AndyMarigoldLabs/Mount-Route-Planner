@@ -6,6 +6,15 @@ local L = MRP.L
 local Util = {}
 MRP.Util = Util
 
+-- Retail's reaction is the 1-8 rank; currentStanding is reputation points.
+-- Missing/invalid data must not turn a point total into a purchase unlock.
+function Util.GetReputationRank(factionID)
+    local data = C_Reputation and C_Reputation.GetFactionDataByID and C_Reputation.GetFactionDataByID(factionID)
+    local rank = data and data.reaction
+    if type(rank) == "number" and rank >= 1 and rank <= 8 and rank == math.floor(rank) then return rank end
+    return nil
+end
+
 ---@generic T
 ---@generic U
 ---@param arr T[]
@@ -204,8 +213,8 @@ function Util.GetStepConditions(step)
             if factionId then
                 factionId = tonumber(factionId)
                 requiredStanding = tonumber(requiredStanding)
-                local factionData = C_Reputation and C_Reputation.GetFactionDataByID and C_Reputation.GetFactionDataByID(factionId)
-                met = factionData and factionData.currentStanding >= requiredStanding or false
+                local rank = Util.GetReputationRank(factionId)
+                met = rank ~= nil and rank >= requiredStanding
             else
                 met = false
             end
