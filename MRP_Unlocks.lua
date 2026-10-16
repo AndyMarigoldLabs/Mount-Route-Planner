@@ -108,6 +108,7 @@ function P:ValidateRegistry()
             local context = { nodes = {} }
             if group.requires then visit(group.requires, context, {}, 0) end
             if group.prepare then visit(group.prepare, context, {}, 0) end
+            for _, requirement in pairs(group.factionRequirements or {}) do visit(requirement, context, {}, 0) end
         end)
         group.invalid = not ok or nil
         if not ok then errors[#errors + 1] = id .. ": " .. tostring(err) end

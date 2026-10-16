@@ -23,6 +23,11 @@ end
 local completed, account, accepted, objectives, waypoints, collected, timers, frames
 local standing, faction, combat, displayUpdates, race, class, reputations, items
 local serverNow, serverReset, resetKnown, resetTimers, gossipNPC, gossipQuests, detailQuest
+local seals, currencyKnown
+C_CurrencyInfo = { GetCurrencyInfo = function(id)
+    equal(id, 241)
+    if currencyKnown then return { quantity = seals, totalEarned = 99999, quantityEarnedThisWeek = 99999 } end
+end }
 function GetServerTime() return serverNow end
 C_DateAndTime = { GetSecondsUntilDailyReset = function() return resetKnown and math.max(0, serverReset - serverNow) or nil end }
 WOW_PROJECT_ID, WOW_PROJECT_MAINLINE = 1, 1
@@ -86,7 +91,9 @@ loadRuntime("Data/MRP_PrerequisiteData.lua")
 loadRuntime("Data/MRP_UnlockNetherwing.lua")
 loadRuntime("Data/MRP_UnlockTournament.lua")
 loadRuntime("Data/MRP_UnlockDailies.lua")
+loadRuntime("Data/MRP_ChampionDailies.lua")
 loadRuntime("MRP_UnlockRouting.lua")
+loadRuntime("MRP_ChampionSeals.lua")
 MRP.Data = { VERSION = 1, STEPS = {}, OPEN_WORLD = {}, DUNGEONS = {}, RAIDS = {}, WORLD_BOSSES = {} }
 MRP.UI = { UpdateDisplay = function() displayUpdates = (displayUpdates or 0) + 1 end }
 loadRuntime("MRP_Filter.lua")
@@ -104,6 +111,7 @@ local function reset()
     standing, faction, combat, displayUpdates = 4, "Alliance", false, 0
     race, class, reputations, items = "Human", "WARRIOR", {}, {}
     serverNow, serverReset, resetKnown, resetTimers = 10000, 20000, true, {}
+    seals, currencyKnown = 0, true
     gossipNPC, gossipQuests, detailQuest = nil, {}, nil
     P.dailyTimer, P.dailyOffers, P.dailyResetAt = nil, {}, nil
     loadRuntime("MRP_CharacterSettings.lua")
@@ -1131,6 +1139,305 @@ test("daily opt-in cannot bypass class, faction, unknown source gates or change 
     MRP.Data.STEPS[1].requirements = nil
     WOW_PROJECT_ID = 2; F:Apply(); equal(F:GetCurrentStep().source.type, "Vendor"); WOW_PROJECT_ID = 1
 end)
+
+local function pricedSource(stepID, npc, mountID, itemID, price)
+    local step = source(stepID, "Vendor", npc, itemID)
+    MRP.Data.OPEN_WORLD[step.source.name] = step.entry
+    step.mounts[1].id = mountID
+    step.mounts[1].source.cost = { type = "currency", currencyId = 241, amount = price }
+    return step
+end
+local function championSetup(side, playerClass)
+    dailySetup("tournament")
+    P:SetDailiesEnabled(false); P:SetEnabled(false)
+    accepted = {}
+    faction, class = side or "Alliance", playerClass or "WARRIOR"
+    race = faction == "Alliance" and "Human" or "Orc"
+    completed[faction == "Alliance" and 13702 or 13736] = true
+    completed[class == "DEATHKNIGHT" and 13795 or 13794] = true
+    MRP.Data.STEPS = { pricedSource(900, faction == "Alliance" and 33307 or 33553, 294, faction == "Alliance" and 45125 or 45595, 100) }
+    P:SetChampionFarmingEnabled(true)
+end
+local function championIDs()
+    local ids = {}
+    for _, step in ipairs(F.filteredSteps) do
+        local q = step.prerequisiteQuest
+        if q and q.championSeals then ids[q.questID or q.dailyGroup] = true end
+    end
+    return ids
+end
+
+test("Champion farming migrates off and operates independently of unlock daily toggles", function()
+    reset(); equal(MRP_CharacterSettings.includeChampionSealFarming, false)
+    MRP_CharacterSettings.includeChampionSealFarming = nil; MRP.Core:InitializeSettings()
+    equal(MRP_CharacterSettings.includeChampionSealFarming, false)
+    championSetup(); equal(MRP_CharacterSettings.includePrerequisiteQuests, false)
+    equal(MRP_CharacterSettings.includePrerequisiteDailies, false); equal(#F.filteredSteps, 3)
+    P:SetEnabled(false); equal(#F.filteredSteps, 3); assert(P.dailyTimer)
+    local timer = P.dailyTimer; P:SetChampionFarmingEnabled(false)
+    assert(timer.cancelled); equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().source.type, "Vendor")
+end)
+
+test("Champion budget sums seal components once per mount and excludes collected goals", function()
+    championSetup()
+    local duplicate = pricedSource(901, 33307, 294, 45125, 100)
+    local mixed = pricedSource(902, 33307, 321, 46752, 999)
+    mixed.mounts[1].source.costs = { { type = "gold", amount = 5000000 }, { type = "currency", currencyId = 241, amount = 5 } }
+    MRP.Data.STEPS[2], MRP.Data.STEPS[3] = duplicate, mixed
+    seals = 35; F:Apply()
+    equal(P.championBudget.total, 105); equal(P.championBudget.count, 2); equal(P.championBudget.remaining, 70)
+    equal(#F.filteredSteps, 3)
+    for _, step in ipairs(F.filteredSteps) do
+        equal(#step.mounts, 2); assert(step.targetStepIDs[900] and step.targetStepIDs[901] and step.targetStepIDs[902])
+    end
+    collected[294] = true; F:Apply(); equal(P.championBudget.total, 5); equal(P.championBudget.remaining, 0)
+    equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().source.type, "Vendor")
+    equal(mixed.mounts[1].source.cost.amount, 999, "source data is immutable")
+end)
+
+test("the lowest verified selected alternative determines the budget and destination", function()
+    championSetup()
+    MRP.Data.STEPS[2] = pricedSource(901, 33307, 294, 45125, 80)
+    seals = 80; F:Apply()
+    equal(P.championBudget.total, 80); equal(P.championBudget.count, 1)
+    equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().id, 901)
+end)
+
+test("price or currency API uncertainty pauses farming without inventing a zero balance", function()
+    championSetup(); currencyKnown = false; F:Apply()
+    equal(P.championBudget.quantity, nil); equal(#F.filteredSteps, 0)
+    assert(P:GetChampionBudgetMessage():find("balance is unavailable", 1, true))
+    currencyKnown = true
+    for _, bad in ipairs({ 0, -1, 1.5, "100" }) do
+        MRP.Data.STEPS[1].mounts[1].source.cost.amount = bad; F:Apply()
+        equal(P.championBudget.unknownCost, true); equal(#F.filteredSteps, 0)
+    end
+    MRP.Data.STEPS[1].mounts[1].source.cost = nil; F:Apply(); equal(#F.filteredSteps, 0)
+    MRP.Data.STEPS[1].mounts[1].source.cost = { type = "currency", currencyId = 241, amount = 100 }
+    F:Apply(); equal(#F.filteredSteps, 3); equal(P.championBudget.quantity, 0)
+end)
+
+test("currency gains stop farming exactly at the full selected budget and spending resumes it", function()
+    championSetup(); seals = 99
+    frames[1].scripts.OnEvent(nil, "CURRENCY_DISPLAY_UPDATE", 241); flush()
+    equal(P.championBudget.remaining, 1); equal(#F.filteredSteps, 3)
+    seals = 100; frames[1].scripts.OnEvent(nil, "CURRENCY_DISPLAY_UPDATE", 241); flush()
+    equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().source.type, "Vendor")
+    seals = 90; frames[1].scripts.OnEvent(nil, "CURRENCY_DISPLAY_UPDATE", 241); flush()
+    equal(#F.filteredSteps, 3); equal(P.championBudget.remaining, 10)
+end)
+
+test("purchases recalculate the remaining goal before the mount is learned", function()
+    championSetup()
+    MRP.Data.STEPS[2] = pricedSource(901, 33307, 321, 46752, 5)
+    seals = 105; F:Apply(); equal(P.championBudget.remaining, 0); equal(#F.filteredSteps, 2)
+    seals, items[45125] = 5, 1
+    frames[1].scripts.OnEvent(nil, "CURRENCY_DISPLAY_UPDATE", 241)
+    frames[1].scripts.OnEvent(nil, "BAG_UPDATE_DELAYED"); flush()
+    equal(P.championBudget.total, 5); equal(P.championBudget.remaining, 0)
+    equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().mounts[1].id, 321)
+    items[45125], collected[294] = nil, true
+    frames[1].scripts.OnEvent(nil, "NEW_MOUNT_ADDED", 294); flush()
+    equal(P.championBudget.total, 5)
+    seals, items[46752] = 0, 1; frames[1].scripts.OnEvent(nil, "MERCHANT_UPDATE"); flush()
+    equal(P.championBudget.count, 0); equal(#F.filteredSteps, 0)
+end)
+
+test("an owned item removes all alternative listings of the same mount from the budget", function()
+    championSetup(); MRP.Data.STEPS[2] = pricedSource(901, 33307, 294, 99999, 100)
+    items[99999] = 1; F:Apply(); equal(P.championBudget.total, 0); equal(#F.filteredSteps, 0)
+end)
+
+test("changing filters cancels orphan Champion farming and recalculates the goal", function()
+    championSetup()
+    F:SetSourceType("Vendor", false); equal(P.championBudget.total, 0); equal(#F.filteredSteps, 0)
+    F:SetSourceType("Vendor", true); equal(P.championBudget.total, 100); equal(#F.filteredSteps, 3)
+    collected[294] = true; F:Apply(); equal(P.championBudget.count, 0); equal(#F.filteredSteps, 0)
+end)
+
+test("Champion farming respects faction, Paladin restrictions and unknown source gates", function()
+    championSetup()
+    MRP.Data.STEPS[2] = pricedSource(901, 34885, 338, 47179, 100)
+    MRP.Data.STEPS[3] = pricedSource(902, 33553, 300, 45595, 100)
+    local unsupported = pricedSource(903, 33307, 321, 46752, 5)
+    unsupported.requirements = { type = "unknown" }; MRP.Data.STEPS[4] = unsupported
+    F:Apply(); equal(P.championBudget.total, 100); equal(P.championBudget.count, 1)
+    class = "PALADIN"; F:Apply(); equal(P.championBudget.total, 200); equal(P.championBudget.count, 2)
+    WOW_PROJECT_ID = 2; F:Apply(); equal(P.championBudget, nil); equal(next(championIDs()), nil); WOW_PROJECT_ID = 1
+end)
+
+test("all four faction and class variants use the correct core Champion daily IDs", function()
+    for _, row in ipairs({
+        { "Alliance", "WARRIOR", 13790, 13789, 13861, 13682 },
+        { "Horde", "WARRIOR", 13811, 13810, 13862, 13809 },
+        { "Alliance", "DEATHKNIGHT", 13793, 13791, 13864, 13788 },
+        { "Horde", "DEATHKNIGHT", 13814, 13813, 13863, 13812 },
+    }) do
+        championSetup(row[1], row[2]); completed[13664] = true; F:Apply()
+        equal(#F.filteredSteps, 4)
+        for i = 3, 6 do
+            local q = P.dailyQuests[row[i]]
+            local g = P.dailyGroups[q.dailyGroupID]
+            local offered = { row[i] }
+            -- The citadel and Threat From Above share a gossip window.
+            if i >= 5 then offered = { row[5], row[6] } end
+            offer(g.id, offered)
+        end
+        local ids = questIDs(F.filteredSteps)
+        equal(#F.filteredSteps, 4)
+        for i = 3, 6 do assert(ids[row[i]], "wrong daily variant") end
+    end
+end)
+
+test("Threat From Above requires its Black Knight unlock unless actually offered or accepted", function()
+    championSetup()
+    assert(not championIDs()["argent.champion.Alliance.other.threat"])
+    offer("argent.champion.Alliance.other.citadel", { 13861 })
+    assert(not questIDs(F.filteredSteps)[13682])
+    accepted[13682] = true; F:Apply(); assert(questIDs(F.filteredSteps)[13682])
+    accepted[13682] = nil; completed[13664] = true; F:Apply()
+    offer("argent.champion.Alliance.other.threat", { 13861, 13682 }); assert(questIDs(F.filteredSteps)[13682])
+end)
+
+test("Champion and Exalted/Crusader access comes from this character, not account achievements", function()
+    championSetup(); completed = {}; account[13702] = true; F:Apply()
+    equal(#F.filteredSteps, 0); assert(P.diagnostics[1].status.message:find("Become a Champion", 1, true))
+    completed[13702], completed[13794] = true, true; F:Apply(); equal(#F.filteredSteps, 3)
+    reputations[1094] = 8; F:Apply(); equal(#F.filteredSteps, 6)
+    for _, city in ipairs(P.tournamentCities) do if city.faction == "Alliance" then completed[city[7]], reputations[city[3]] = true, 8 end end
+    reputations[1106] = 8; F:Apply(); equal(#F.filteredSteps, 8)
+    completed[13713] = nil; F:Apply(); equal(#F.filteredSteps, 6)
+end)
+
+test("Exalted and Crusader rotating dailies route only offered alternatives", function()
+    championSetup(); standing = 8
+    for _, city in ipairs(P.tournamentCities) do if city.faction == "Alliance" then completed[city[7]] = true end end
+    F:Apply()
+    offer("argent.champion.Alliance.exalted.rescue", { 14080, 14096 })
+    offer("argent.champion.Alliance.exalted.food", { 14112 })
+    offer("argent.champion.crusader.adelard", { 14102 })
+    offer("argent.champion.crusader.silverdawn", { 14108 })
+    local ids = questIDs(F.filteredSteps)
+    for _, id in ipairs({ 14080, 14096, 14112, 14102, 14108 }) do assert(ids[id]) end
+    for _, id in ipairs({ 14074, 14152, 14077, 14076, 14090, 14105, 14101, 14104, 14107 }) do assert(not ids[id]) end
+    turnIn(14102); assert(not championIDs()["argent.champion.crusader.adelard"])
+    nextDay(); assert(championIDs()["argent.champion.crusader.adelard"])
+end)
+
+test("neutral Crusader dailies use the current faction's milestones", function()
+    championSetup(); standing = 8
+    for _, city in ipairs(P.tournamentCities) do if city.faction == "Horde" then completed[city[7]] = true end end
+    F:Apply(); assert(not championIDs()["argent.champion.crusader.adelard"])
+    for _, city in ipairs(P.tournamentCities) do if city.faction == "Alliance" then completed[city[7]] = true end end
+    F:Apply(); assert(championIDs()["argent.champion.crusader.adelard"])
+    reputations[72] = 7; F:Apply(); assert(not championIDs()["argent.champion.crusader.adelard"])
+    -- An accepted quest is direct evidence even if old milestone flags are absent.
+    accepted[14102] = true; F:Apply(); assert(questIDs(F.filteredSteps)[14102])
+end)
+
+test("skippable Champion introductions do not replay after actual daily access is observed", function()
+    championSetup(); completed[13794] = nil; F:Apply(); assert(questIDs(F.filteredSteps)[13794])
+    offer("argent.champion.Alliance.other.field", { 13789 })
+    assert(not questIDs(F.filteredSteps)[13794]); equal(MRP_CharacterSettings.championDailyAccess["Alliance.other"], true)
+    nextDay(); assert(not questIDs(F.filteredSteps)[13794])
+    P.dailyOffers = {}; F:Apply(); assert(not questIDs(F.filteredSteps)[13794])
+end)
+
+test("the first Champion Rises handoff is routed before Champion seal dailies", function()
+    championSetup(); completed[13702], completed[13794], completed[13699] = nil, nil, true
+    F:Apply(); equal(#F.filteredSteps, 1); equal(currentQuest(), 13702)
+    completed[13702] = true; F:Apply(); assert(questIDs(F.filteredSteps)[13794])
+    assert(championIDs()["argent.champion.Alliance.other.melee"])
+end)
+
+test("seals do not bypass a selected vendor's reputation or city prerequisites", function()
+    championSetup()
+    MRP.Data.STEPS = { pricedSource(900, 34881, 329, 46813, 150) }
+    F:Apply(); equal(#F.filteredSteps, 3)
+    seals = 150; F:Apply(); equal(#F.filteredSteps, 0)
+    reputations[1094] = 8; F:Apply(); equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().source.npcID, 34881)
+end)
+
+test("Champion farming spans daily resets until enough seals are actually credited", function()
+    championSetup(); MRP.Data.STEPS[1].mounts[1].source.cost.amount = 5
+    for day = 1, 2 do
+        F:Apply()
+        for _, id in ipairs({ 13790, 13789, 13861 }) do
+            if P.championBudget.remaining > 0 then
+                offer(P.dailyQuests[id].dailyGroupID, { id })
+                accepted[id] = true; F:Apply(); assert(questIDs(F.filteredSteps)[id])
+                turnIn(id)
+                -- Quest turn-in/purse predictions must not credit currency.
+                equal(P.championBudget.quantity, seals)
+                seals = seals + 1
+                frames[1].scripts.OnEvent(nil, "CURRENCY_DISPLAY_UPDATE", 241); flush()
+            end
+        end
+        if day == 1 then equal(#F.filteredSteps, 0); nextDay(); equal(#F.filteredSteps, 3) end
+    end
+    equal(seals, 5); equal(P.championBudget.remaining, 0)
+    equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().source.type, "Vendor")
+    nextDay(); equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().source.type, "Vendor")
+end)
+
+test("Champion reset recovery retains carried quests and expires reload/offline completions", function()
+    championSetup(); accepted[13789] = true; objectives[13789] = true; turnIn(13790)
+    P.dailyOffers, P.dailyResetAt = {}, nil; P:StartDailyResetWatch(); F:Apply()
+    assert(not championIDs()["argent.champion.Alliance.other.melee"])
+    nextDay(); assert(championIDs()["argent.champion.Alliance.other.melee"])
+    assert(questIDs(F.filteredSteps)[13789])
+    local _, phase = P:GetQuestDestination(P.dailyQuests[13789]); equal(phase, "turnIn")
+    turnIn(13790); serverNow, serverReset = serverReset + 100000, serverReset + 172800
+    P.dailyOffers, P.dailyResetAt = {}, nil; P:StartDailyResetWatch(); F:Apply()
+    assert(championIDs()["argent.champion.Alliance.other.melee"])
+end)
+
+test("Champion farming waits for an unknown reset while preserving accepted quest navigation", function()
+    championSetup(); offer("argent.champion.Alliance.other.melee", { 13790 })
+    accepted[13789] = true; waypoints[13789] = { 118, 0.45, 0.5 }
+    resetKnown = false; F:Apply()
+    equal(#F.filteredSteps, 1); equal(currentQuest(), 13789)
+    local location, phase = P:GetQuestDestination(P.dailyQuests[13789])
+    equal(phase, "objective"); equal(location.x, 45); equal(location.y, 50)
+    P:StartDailyResetWatch(); equal(P.dailyTimer.delay, 60)
+    -- Recovery beyond the boundary discards yesterday's cached offer.
+    resetKnown = true; nextDay()
+    assert(championIDs()["argent.champion.Alliance.other.melee"])
+    assert(not questIDs(F.filteredSteps)[13790]); assert(questIDs(F.filteredSteps)[13789])
+end)
+
+test("reaching the seal budget drops completed farming stops even with auto-advance disabled", function()
+    championSetup(); offer("argent.champion.Alliance.other.field", { 13789 })
+    for i, step in ipairs(F.filteredSteps) do if step.prerequisiteQuest.questID == 13789 then MRP_CharacterSettings.currentStep = i end end
+    MRP_CharacterSettings.autoAdvance = false
+    turnIn(13789); equal(currentQuest(), 13789)
+    seals = 100; frames[1].scripts.OnEvent(nil, "CURRENCY_DISPLAY_UPDATE", 241); flush()
+    equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().source.type, "Vendor")
+end)
+
+test("Champion currency and reset refreshes defer during combat and resume automatically", function()
+    championSetup(); combat = true; seals = 100
+    frames[1].scripts.OnEvent(nil, "CURRENCY_DISPLAY_UPDATE", 241); flush()
+    equal(#F.filteredSteps, 3); assert(P.refreshAfterCombat)
+    combat = false; frames[1].scripts.OnEvent(nil, "PLAYER_REGEN_ENABLED"); flush()
+    equal(#F.filteredSteps, 1); equal(F:GetCurrentStep().source.type, "Vendor")
+end)
+
+if arg[1] then
+    test("published Tournament prices produce the expected faction and Paladin budgets", function()
+        local data = { Internal = {} }
+        assert(loadfile(arg[1] .. "/Steps/Standard/MRPData_Steps.lua"))("MountRoutePlannerData", data)
+        assert(loadfile(arg[1] .. "/Mounts/Standard/MRPData_Mounts.lua"))("MountRoutePlannerData", data)
+        for _, side in ipairs({ "Alliance", "Horde" }) do
+            championSetup(side)
+            MRP.Data.STEPS, MRP.Data.OPEN_WORLD = data.Steps, data.openWorld
+            MRP.Data.DUNGEONS, MRP.Data.RAIDS, MRP.Data.WORLD_BOSSES = data.dungeons, data.raids, data.worldBosses
+            F:Apply()
+            equal(P.championBudget.count, 14); equal(P.championBudget.total, 1025)
+            class = "PALADIN"; F:Apply(); equal(P.championBudget.count, 15); equal(P.championBudget.total, 1125)
+        end
+    end)
+end
 
 print(string.format("%d tests, %d failures", tests, failures))
 os.exit(failures == 0 and 0 or 1)

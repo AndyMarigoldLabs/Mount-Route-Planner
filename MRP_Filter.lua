@@ -237,7 +237,7 @@ function Filter:Apply(onLoad, questUpdate)
     if oldStep then
         -- Keep a completed quest visible until Next when auto-advance is disabled.
         if questUpdate and oldStep.prerequisiteQuest and not MRP_CharacterSettings.autoAdvance
-            and MRP_CharacterSettings.includePrerequisiteQuests
+            and MRP.Prerequisites:ShouldRouteQuest(oldStep.prerequisiteQuest)
             and MRP.Prerequisites:CanRetainCompletedQuest(oldStep.prerequisiteQuest) then
             local insertAt = math.min(oldStepNumber, #self.filteredSteps + 1)
             for i, step in ipairs(self.filteredSteps) do

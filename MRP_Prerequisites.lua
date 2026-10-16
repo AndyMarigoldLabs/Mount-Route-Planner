@@ -235,6 +235,7 @@ end
 function Prerequisites:ExpandSteps(steps)
     self:SyncDailyReset()
     if self.PrepareWaveContext then self:PrepareWaveContext(steps) end
+    self:PrepareChampionBudget(steps)
     local result, quests, diagnostics = {}, {}, {}
     for _, step in ipairs(steps) do
         local available = {}
@@ -254,18 +255,20 @@ function Prerequisites:ExpandSteps(steps)
                     available[#available + 1] = mount
                 else
                     diagnostics[#diagnostics + 1] = { step = step, mount = mount, status = status }
-                    if MRP_CharacterSettings.includePrerequisiteQuests and not collected then
+                    if not collected then
                         for _, quest in ipairs(status.quests or {}) do
-                            local planned = self:MakeQuestStep(quest, step, mount)
-                            if not quests[planned.id] then
-                                quests[planned.id] = planned
-                                result[#result + 1] = planned
-                            else
-                                local existing = quests[planned.id]
-                                existing.targetStepIDs[step.id] = true
-                                local found = false
-                                for _, reward in ipairs(existing.mounts) do if reward.id == mount.id then found = true; break end end
-                                if not found then existing.mounts[#existing.mounts + 1] = planned.mounts[1] end
+                            if self:ShouldRouteQuest(quest) then
+                                local planned = self:MakeQuestStep(quest, step, mount)
+                                if not quests[planned.id] then
+                                    quests[planned.id] = planned
+                                    result[#result + 1] = planned
+                                else
+                                    local existing = quests[planned.id]
+                                    existing.targetStepIDs[step.id] = true
+                                    local found = false
+                                    for _, reward in ipairs(existing.mounts) do if reward.id == mount.id then found = true; break end end
+                                    if not found then existing.mounts[#existing.mounts + 1] = planned.mounts[1] end
+                                end
                             end
                         end
                     end
@@ -327,6 +330,8 @@ function Prerequisites:SetEnabled(enabled)
 end
 
 function Prerequisites:PrintStatus()
+    local budget = self:GetChampionBudgetMessage()
+    if budget then print("|cffffcc00[MRP]|r " .. budget) end
     local count = 0
     for _, blocked in ipairs(self.diagnostics or {}) do
         count = count + 1

@@ -5,7 +5,8 @@ P.dailyGroups, P.dailyQuests, P.sealDailyGroups = {}, {}, {}
 local function onQuest(id) return C_QuestLog and C_QuestLog.IsOnQuest and C_QuestLog.IsOnQuest(id) end
 local function enabled()
     return WOW_PROJECT_ID == WOW_PROJECT_MAINLINE and MRP_CharacterSettings
-        and MRP_CharacterSettings.includePrerequisiteQuests and MRP_CharacterSettings.includePrerequisiteDailies
+        and ((MRP_CharacterSettings.includePrerequisiteQuests and MRP_CharacterSettings.includePrerequisiteDailies)
+            or MRP_CharacterSettings.includeChampionSealFarming)
 end
 
 function P:RegisterDailyGroup(id, group)
@@ -15,6 +16,7 @@ function P:RegisterDailyGroup(id, group)
     for _, q in ipairs(group.quests) do
         assert(not self.dailyQuests[q.questID], "Duplicate daily quest")
         q.daily, q.scope, q.dailyGroupID = true, "character", id
+        q.championSeals = group.championSeals
         q.mapID, q.x, q.y = group.mapID, group.x, group.y
         q.turnIn = { mapID = group.mapID, x = group.x, y = group.y }
         q.note = group.note
@@ -65,6 +67,12 @@ end
 
 function P:CanRetainCompletedQuest(q)
     if q.dailyGroup then return false end
+    if q.championSeals then
+        local budget = self.championBudget
+        if not self:ChampionFarmingEnabled() or not budget or not budget.remaining or budget.remaining <= 0 then return false end
+    elseif not MRP_CharacterSettings.includePrerequisiteQuests or (q.daily and not MRP_CharacterSettings.includePrerequisiteDailies) then
+        return false
+    end
     if q.daily and (not enabled() or not self.dailyResetAt or q.dailyResetAt ~= self.dailyResetAt) then return false end
     return self:IsRoutedQuestComplete(q) == true
 end
@@ -165,7 +173,9 @@ function P:ResolveDailyGroups(ids)
             if #active > 0 then
                 for _, q in ipairs(active) do actions[#actions + 1] = q end
             end
-            local eligible = not group.requires or self:Evaluate(group.requires) == true
+            local requirement = group.factionRequirements and group.factionRequirements[UnitFactionGroup("player")] or group.requires
+            local eligible = (not requirement and not group.factionRequirements) or self:Evaluate(requirement) == true
+                or (group.championSeals and offered)
             if eligible and #active == 0 and group.prepare and self:Evaluate(group.prepare) ~= true then
                 local prep = self:ResolveRequirement(group.prepare)
                 unknown = unknown or prep.state == "unknown"
@@ -182,7 +192,7 @@ function P:ResolveDailyGroups(ids)
                 end
                 if unchecked and self.dailyResetAt then
                     actions[#actions + 1] = { dailyGroup = id, name = group.name,
-                        mapID = group.mapID, x = group.x, y = group.y, note = group.note }
+                        mapID = group.mapID, x = group.x, y = group.y, note = group.note, championSeals = group.championSeals }
                 end
             end
         elseif not group or group.invalid then
@@ -196,7 +206,7 @@ function P:ResolveDailyGroups(ids)
 end
 
 function P:ResolveDailyProgress(requirement, quest)
-    if not enabled() then return nil end
+    if not enabled() or not MRP_CharacterSettings.includePrerequisiteQuests or not MRP_CharacterSettings.includePrerequisiteDailies then return nil end
     if quest and self.sealDailyGroups[quest.questID] then
         return self:ResolveDailyGroups(self.sealDailyGroups[quest.questID])
     elseif requirement.type == "reputation" and requirement.factionID == 1015

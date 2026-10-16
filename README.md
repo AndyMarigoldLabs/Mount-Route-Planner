@@ -7,6 +7,10 @@ city, faction, class, and reputation requirements apply to the appropriate mount
 Enable **Include reputation and unlock seal dailies** or run `/mrp dailies on`
 to route Netherwing reputation and Aspirant's/Valiant's Seal progress across
 server daily resets. This option is also saved per character and defaults to off.
+Enable **Farm Champion's Seals for selected mounts** or run `/mrp championseals on`
+to route available Tournament dailies until your currency balance covers the
+selected mount purchases. This independent option defaults to off, shares daily
+stops across mounts, and updates the budget after purchases and collection changes.
 See [prerequisite routing](docs/prerequisites.md) for coverage, testing and local
 build instructions.
 

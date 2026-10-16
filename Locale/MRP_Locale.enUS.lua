@@ -282,6 +282,23 @@ for _, text in ipairs({
   "Daily availability could not be verified. Check the quest giver or quest log.",
 }) do MRP.L[text] = text end
 
+-- Independent Champion's Seal purchase farming.
+for _, text in ipairs({
+  "Farm Champion's Seals for selected mounts",
+  "Farm available Tournament dailies until you hold enough seals for all selected, unpurchased mounts. Counts each mount once. Independent of unlock daily routing; other purchase requirements still apply.",
+  "Champion's Seal farming is enabled.",
+  "Champion's Seal farming is disabled.",
+  " - /mrp championseals on|off|status → Farm seals for selected Tournament mounts",
+  "A selected mount's Champion's Seal price is unknown. Farming is paused until its price can be verified.",
+  "No unpurchased Champion's Seal mounts match your filters.",
+  "Champion's Seal balance is unavailable. Farming is paused until the currency data loads.",
+  "Champion's Seals: %d / %d for %d selected mounts (%d more). Gold and other purchase requirements still apply.",
+  "Become a Champion on this character first. Enable prerequisite quest routing to follow the Tournament unlocks.",
+  "This mount item is already owned. Learn it to add it to your collection.",
+  "Another selected listing supplies this mount for fewer verified Champion's Seals.",
+  "Earn Champion's Seals for your selected mounts. Choose and open a Champion's Purse when offered; unopened rewards are not spendable seals.",
+}) do MRP.L[text] = text end
+
 setmetatable(MRP.L, {
   __index = function(t, k)
     rawset(t, k, k); return k;

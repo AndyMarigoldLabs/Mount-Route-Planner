@@ -14,6 +14,12 @@ option defaults to off and enables prerequisite chains when switched on.
 option enabled; `/mrp prerequisites off` suspends both. `/mrp dailies status`
 reports whether daily routing is active and lists remaining mount requirements.
 
+**Farm Champion's Seals for selected mounts**, or `/mrp championseals on`, is a
+third per-character option, off by default. It routes purchase-currency dailies
+independently of the two unlock options. `/mrp championseals off` removes those
+farming stops; `/mrp championseals status` reports the shared budget and blocked
+mounts. Turning prerequisite routing off does not disable this separate option.
+
 Mount source filters select which mounts to pursue. Unlock quests inherit that
 selection: enabling Vendors and disabling Quest rewards still allows the quests
 needed for a selected vendor. Already collected and opposite-faction mounts do
@@ -115,7 +121,8 @@ cities of the current faction, while selecting one city vendor does not.
 
 Character quest flags and character reputation establish these milestones;
 account-wide achievement completion is not used as proof of vendor access.
-Champion's Seal prices remain purchase information, not prerequisite quests.
+Champion's Seal prices are purchase requirements. The separate farming option
+below can route available dailies to fund those purchases.
 
 An accepted **Up To The Challenge** waits for **15 Aspirant's Seals (45192)**;
 an accepted **Valiant's Charge** waits for **25 Valiant's Seals (44987)**. The
@@ -151,9 +158,60 @@ Grand Melee, and At the Enemy's Gates for Valiants. Only the currently accepted
 charge generates seal dailies; accepting it first also proves that this character
 has reached that stage. Shared mount goals reuse the same daily stops. Completing
 a city's charge/challenge advances through the existing city selection logic.
-Champion's Seals (currency 241) for purchases and the separate city, Argent
-Crusade, Silver Covenant and Sunreaver reputation grinds remain outside this
-unlock-seal feature. Vendor access and purchase affordability remain distinct.
+Champion's Seals (currency 241) use the separate farming option below. City,
+Argent Crusade, Silver Covenant and Sunreaver reputation grinds are not generated
+automatically. Vendor access and purchase affordability remain distinct.
+
+## Champion's Seal purchase farming
+
+The budget includes uncollected Tournament mounts selected by the existing
+source, expansion, faction and collection filters. It covers the city vendors,
+Argent Hippogryph, Hiren/Vasarin and Dame Evniki, respecting faction and Paladin
+restrictions. Unknown source requirements do not create farming errands.
+
+Each mount journal ID counts once. Duplicate vendor listings share the cheapest
+verified selected seal price and its destination; a more expensive or unpriced
+alternative is withheld. Already purchased items in this character's bags or
+bank remove that mount from the budget even before it is learned. Mixed prices
+include only currency 241: gold and other costs still have to be paid separately.
+For example, a 100-seal mount and a mount costing 5 seals plus gold create a
+105-seal target. With 35 seals, the route farms the remaining 70.
+
+Only `C_CurrencyInfo.GetCurrencyInfo(241).quantity` counts as spendable balance.
+Lifetime earnings, another character's currency, predicted quest rewards and
+unopened Champion's Purses do not count. Missing currency data or a goal without
+any verified seal price pauses farming and explains why. Prices come from the
+selected published mount records; generated data is never mutated.
+
+All selected mounts share the same daily stops. Farming stops when the current
+balance covers their combined budget, then eligible vendors return to the route.
+Currency, bag, merchant and collection events recalculate the remainder. Buying
+one mount lowers both the balance and the target; spending seals elsewhere can
+restart farming. Reaching the target removes farming stops even with auto-advance
+disabled. Unmet city or reputation unlocks continue to block their vendors.
+
+| Daily group | Access used to plan a quest-giver visit |
+| --- | --- |
+| Among the Champions, Taking Battle to the Enemy, Battle Before the Citadel | This character's first Champion Rises or Champion introduction |
+| Threat from Above | Core Champion access plus The Black Knight's Fall (13664) |
+| Narasi/Girana's rescue rotation and separate Kul daily; Savinia/Tylos's food rotation | First Champion Rises plus Silver Covenant/Sunreavers Exalted |
+| High Crusader Adelard and Crusader Silverdawn rotations | This character's five city Champions and city/Argent Crusade Exalted requirements |
+
+The four Alliance/Horde and Death Knight/other-class core quest variants use
+their own IDs and givers. The first Champion Rises handoff and the Eadric/Crok
+introductions are routed when needed. Actual core daily access is remembered on
+this character so a skipped introduction is not repeatedly offered. A character
+who has not become a Champion is directed to enable the prerequisite options.
+Account-wide titles and achievements do not establish daily access.
+
+Eligible NPC visits resolve into their actual offered quests. Accepted quests
+and live offers can prove access even when historical flags are absent. Rotations
+are never guessed; Kul's daily is independent of the rescue rotation. The Black
+Knight chain, extra reputation grinds, dungeon farming and item-started optional
+quests are not added. Currency earned through any of those activities still
+counts toward the budget.
+
+## Availability and daily resets
 
 An unvisited NPC appears as **Daily quest giver**, not as a promise that every
 candidate is available. The gossip list resolves the visit into the quests
@@ -204,11 +262,13 @@ Evidence checked on 2026-10-16:
 - [Upstream v2.4.5 data](https://github.com/Deathwing/Mount-Route-Planner/releases/tag/v2.4.5): NPC and four mount-item mappings, verified by an integration test against the released archive.
 - [Blizzard QuestLog API declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/QuestLogDocumentation.lua): completion scope, quest status and waypoint signatures.
 - [Blizzard DateAndTime API declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/DateAndTimeDocumentation.lua): server daily-reset countdown.
+- [Blizzard CurrencyInfo API declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/CurrencyInfoDocumentation.lua): spendable balance and currency update events.
 - [ALL THE THINGS: Storm Peaks](https://github.com/DFortun81/AllTheThings/blob/master/.contrib/.db/standard/02%20-%20Outdoor%20Zones/04%20Northrend/The%20Storm%20Peaks.lua): Gretta's daily IDs and Aberrations branch.
 - [Back to the Pit progression](https://warcraft.wiki.gg/wiki/Back_to_the_Pit) and [Retail Gretta rotation report](https://us.forums.blizzard.com/en/wow/t/gretta-the-arbiter/1396163): separate daily unlocks and rotation.
 - [ALL THE THINGS: Netherwing](https://github.com/DFortun81/AllTheThings/blob/master/.contrib/.db/standard/06%20-%20Expansion%20Features/02%20-%20Burning%20Crusade/Netherwing.lua), [Shadowmoon Valley](https://github.com/DFortun81/AllTheThings/blob/master/.contrib/.db/standard/02%20-%20Outdoor%20Zones/03%20Outland/Shadowmoon%20Valley.lua) and [WoW-Pro Netherwing reference](https://www.wow-pro.com/neutral-netherdrake/): factual quest IDs, alternatives, reputation gates and coordinates.
 - [Warcraft Mounts: Netherwing choice](https://www.warcraftmounts.com/mounts/veridiannetherwingdrake): one free reward and other colors sold by Hurlunk.
 - [ALL THE THINGS: Argent Tournament](https://github.com/DFortun81/AllTheThings/blob/master/.contrib/.db/standard/06%20-%20Expansion%20Features/03%20-%20Wrath%20of%20the%20Lich%20King/Argent%20Tournament.lua): factual quest, item, vendor, faction and class identifiers and coordinates.
+- [Champion's Seal](https://www.wowhead.com/currency=241/champions-seal) and [The Fate of the Fallen](https://warcraft.wiki.gg/wiki/The_Fate_Of_The_Fallen): purchase currency and additional Champion daily rewards.
 - [Championing the Argent Tournament](https://www.wowhead.com/guide/world-events/championing-the-argent-tournament), [Crusader requirements](https://warcraft.wiki.gg/wiki/Exalted_Argent_Champion_of_the_Alliance) and [Argent Charger](https://warcraft.wiki.gg/wiki/Argent_Charger): distinct city, reputation and Paladin restrictions.
 - [Blizzard GossipInfo declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/GossipInfoDocumentation.lua): live quest offers; no quest acceptance or turn-in is automated.
 
@@ -296,7 +356,10 @@ choice behavior, waits, character/account scope, invalid graphs, filters and
 waypoints. Daily tests cover shared stops, rotating offers, all twelve faction/city
 seal loops over multiple resets, rank progression, completion persistence, offline
 and online reset recovery, carried quests, auto-advance, missing APIs and combat
-deferral. To include the
+deferral. Champion farming tests cover shared budgets, mixed gold/seal prices,
+alternative listings, item ownership, unknown prices/balances, purchases, all
+four core quest variants, Exalted/Crusader gates and rotations, and stopping at
+the goal across multiple reset periods. To include the
 published-data regression, append an extracted `MountRoutePlannerData` directory:
 
 ```powershell
@@ -338,6 +401,14 @@ Revered versus Exalted purchases. Then verify:
   offered dailies, complete objectives and turn-ins, and reach 15/25 carried
   seals. Test a reset while online, a reload before reset, a login after reset,
   a quest carried across reset, and a completed stop with auto-advance off.
+- `/mrp championseals on` with both unlock options off, then together with them.
+  Select multiple Tournament mount sources and confirm their shared target.
+  Check both factions and Death Knight givers, Threat from Above access, and
+  Exalted/Crusader rotations including Kul alongside the rescue quest. Confirm
+  that opening purses changes the balance, reaching the target restores eligible
+  vendors, and buying an item removes its cost before learning it. Test spending
+  on something else, deselecting vendors, reload/offline/online resets, a carried
+  daily, and reaching the target with auto-advance off.
 
 UI/localized text and actual NPC availability cannot be established by the mocked
 Lua tests. For packaged-file verification, pass the expanded addon directory as

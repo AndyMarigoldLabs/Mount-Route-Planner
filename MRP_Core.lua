@@ -813,6 +813,9 @@ function Core:InitializeSettings()
     if MRP_CharacterSettings.includePrerequisiteDailies == nil then
         MRP_CharacterSettings.includePrerequisiteDailies = false
     end
+    if MRP_CharacterSettings.includeChampionSealFarming == nil then
+        MRP_CharacterSettings.includeChampionSealFarming = false
+    end
 
     if MRP_CharacterSettings.currentStep == nil then
         MRP_CharacterSettings.currentStep = 1
@@ -913,6 +916,8 @@ watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
 watcher:RegisterEvent("GOSSIP_SHOW")
 watcher:RegisterEvent("GOSSIP_CLOSED")
 watcher:RegisterEvent("QUEST_DETAIL")
+watcher:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+watcher:RegisterEvent("MERCHANT_UPDATE")
 watcher:SetScript("OnEvent", function(_, event, ...)
     MRP.Prerequisites:HandleDailyEvent(event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
@@ -922,6 +927,7 @@ watcher:SetScript("OnEvent", function(_, event, ...)
     if event == "QUEST_TURNED_IN" or event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED"
         or event == "QUEST_REMOVED" or event == "UPDATE_FACTION"
         or event == "GOSSIP_SHOW" or event == "GOSSIP_CLOSED" or event == "QUEST_DETAIL"
+        or event == "CURRENCY_DISPLAY_UPDATE" or event == "MERCHANT_UPDATE"
         or (event == "PLAYER_REGEN_ENABLED" and MRP.Prerequisites.refreshAfterCombat) then
         MRP.Prerequisites:QueueRefresh()
         return
@@ -1042,6 +1048,10 @@ function Core:HandleSlashCommand(msg)
         print(MRP_CharacterSettings.includePrerequisiteQuests and MRP_CharacterSettings.includePrerequisiteDailies
             and L["Unlock dailies are enabled."] or L["Unlock dailies are disabled."])
         MRP.Prerequisites:PrintStatus()
+    elseif cmd == "championseals" then
+        if arg1 == "on" or arg1 == "off" then MRP.Prerequisites:SetChampionFarmingEnabled(arg1 == "on") end
+        print(MRP.Prerequisites:ChampionFarmingEnabled() and L["Champion's Seal farming is enabled."] or L["Champion's Seal farming is disabled."])
+        MRP.Prerequisites:PrintStatus()
     elseif cmd == "updatedisplaydelayed" then
         C_Timer.After(tonumber(arg1) or 0.25, function() MRP.UI:UpdateDisplay() end)
     else
@@ -1057,6 +1067,7 @@ function Core:HandleSlashCommand(msg)
         print(L[" - /mrp route → Recalculate the optimized route"])
         print(L[" - /mrp prerequisites on|off|status → Route unlock quests or list blocked mounts"])
         print(L[" - /mrp dailies on|off|status → Route Netherwing reputation and Tournament unlock seal dailies"])
+        print(L[" - /mrp championseals on|off|status → Farm seals for selected Tournament mounts"])
         print(L[" - /mrp updatedisplaydelayed <number> → Force update of the display after a delay (default: 0.25 seconds)"])
     end
 end

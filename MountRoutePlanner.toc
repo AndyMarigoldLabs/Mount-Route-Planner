@@ -69,7 +69,9 @@ Data\MRP_PrerequisiteData.lua
 Data\MRP_UnlockNetherwing.lua
 Data\MRP_UnlockTournament.lua
 Data\MRP_UnlockDailies.lua
+Data\MRP_ChampionDailies.lua
 MRP_UnlockRouting.lua
+MRP_ChampionSeals.lua
 MRP_Update.lua
 
 MRP_Filter.lua

@@ -7,6 +7,8 @@
 ---@field includePrerequisiteQuests boolean Whether to route known mount unlock quests (opt-in).
 ---@field includePrerequisiteDailies boolean Whether to route daily progress for known unlocks (opt-in).
 ---@field prerequisiteDailyState table? Character-local completions with a server reset expiry.
+---@field includeChampionSealFarming boolean Whether to farm seals for selected Tournament purchases (opt-in).
+---@field championDailyAccess table<string, boolean>? Observed character access, by faction/class, to core Champion dailies.
 ---@field currentStep number The current step in the route being followed.
 ---@field filter FilterSettings The filter settings for the character.
 ---@field ignoredHelpfulItems { number: boolean } A list of helpful items to ignore for this character.
@@ -16,6 +18,7 @@ MRP_CharacterSettings = {
     autoAdvance = true,
     includePrerequisiteQuests = false,
     includePrerequisiteDailies = false,
+    includeChampionSealFarming = false,
     currentStep = 1,
     filter = {
         expansions = {

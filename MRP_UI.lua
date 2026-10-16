@@ -1154,6 +1154,11 @@ function UI:UpdateDisplay()
         end
     end
 
+    local budget = MRP.Prerequisites.championBudget
+    if budget and ((step.prerequisiteQuest and step.prerequisiteQuest.championSeals) or budget.selections[step.id]) then
+        frame.noteText:SetText((frame.noteText:GetText() or "") .. "\n" .. MRP.Prerequisites:GetChampionBudgetMessage())
+    end
+
     -- Show warnings for any unmet conditions (faction, warfront, reputation, holiday, …)
     local conditions = MRP.Util.GetStepConditions(step)
     for _, cond in ipairs(conditions) do

@@ -46,6 +46,7 @@ if not MRPData.Internal then return end
 ---@field dailyGroupID string? authored daily group for this quest
 ---@field dailyGroup string? runtime visit to check the NPC's actual daily offers
 ---@field dailyResetAt number? server reset boundary attached to a runtime daily step
+---@field championSeals boolean? controlled by the independent Champion's Seal farming opt-in
 
 ---@class DailyQuestGroup : QuestLocation
 ---@field id string stable group key
@@ -55,6 +56,8 @@ if not MRPData.Internal then return end
 ---@field quests UnlockQuest[] verified candidates, not assumed simultaneous offers
 ---@field faction "Alliance"|"Horde"? omit for both
 ---@field requires AcquisitionRequirement? eligibility gate (does not initiate this path)
+---@field factionRequirements table<string, AcquisitionRequirement>? character-faction gates for shared neutral quest IDs
+---@field championSeals boolean? daily group contributing to the selected mount purchase budget
 ---@field prepare AcquisitionRequirement? one-time setup path after the eligibility gate
 ---@field rotation boolean? at most one alternative may be available/completed per reset
 ---@field note string? daily progress instructions
