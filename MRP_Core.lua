@@ -919,6 +919,7 @@ watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
 watcher:RegisterEvent("GOSSIP_SHOW")
 watcher:RegisterEvent("GOSSIP_CLOSED")
 watcher:RegisterEvent("QUEST_DETAIL")
+watcher:RegisterEvent("QUEST_GREETING")
 watcher:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
 watcher:RegisterEvent("MERCHANT_UPDATE")
 watcher:SetScript("OnEvent", function(_, event, ...)
@@ -929,7 +930,7 @@ watcher:SetScript("OnEvent", function(_, event, ...)
     end
     if event == "QUEST_TURNED_IN" or event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED"
         or event == "QUEST_REMOVED" or event == "UPDATE_FACTION"
-        or event == "GOSSIP_SHOW" or event == "GOSSIP_CLOSED" or event == "QUEST_DETAIL"
+        or event == "GOSSIP_SHOW" or event == "GOSSIP_CLOSED" or event == "QUEST_DETAIL" or event == "QUEST_GREETING"
         or event == "CURRENCY_DISPLAY_UPDATE" or event == "MERCHANT_UPDATE"
         or (event == "PLAYER_REGEN_ENABLED" and MRP.Prerequisites.refreshAfterCombat) then
         MRP.Prerequisites:QueueRefresh()

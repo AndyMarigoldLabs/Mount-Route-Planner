@@ -95,7 +95,12 @@ end
 for _, city in ipairs(P.tournamentCities) do
     P:RegisterBinding({ sourceType = "Vendor", npcID = city[2], get = function() return provider(city.completed, city.faction) end })
 end
-P:RegisterBinding({ sourceType = "Vendor", itemID = 45725, get = function() return provider("champion", UnitFactionGroup("player")) end })
+P:RegisterBinding({ sourceType = "Vendor", itemID = 45725, get = function()
+    -- UnitFactionGroup also returns a localized name. Do not let Lua pass that
+    -- extra return as provider's optional class restriction.
+    local faction = UnitFactionGroup("player")
+    return provider("champion", faction)
+end })
 for _, info in ipairs({ { 34881, "Alliance", 1094 }, { 34772, "Horde", 1124 } }) do
     P:RegisterBinding({ sourceType = "Vendor", npcID = info[1], get = function()
         local source, reward = provider("champion", info[2])

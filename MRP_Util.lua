@@ -97,6 +97,11 @@ function Util.GetMountInfoSafe(mount)
         end
     end
 
+    -- Retail collection is a journal fact. Spellbook presence can include unknown
+    -- overrides, and a mount item (even in a bank) is not a learned mount. Leave
+    -- missing journal data uncollected; purchase budgets check owned items separately.
+    if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then return name, icon, false end
+
     if mount.spellId and C_SpellBook and C_SpellBook.IsSpellInSpellBook and C_SpellBook.IsSpellInSpellBook(mount.spellId) then
         if C_Spell and C_Spell.GetSpellInfo then
             local spellInfo = C_Spell.GetSpellInfo(mount.spellId)

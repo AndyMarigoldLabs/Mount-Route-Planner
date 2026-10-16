@@ -15,12 +15,13 @@ end
 function P:PrepareWaveContext(steps)
     self.netherwingChoice, self.tournamentPath = nil, nil
     if WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE then return end
-    local goals, anyChampion, crusader = {}, false, false
+    local goals, anyChampion, crusader, grettaSelected = {}, false, false, false
     local faction = UnitFactionGroup("player")
     for _, step in ipairs(steps) do
         for _, mount in ipairs(step.mounts) do
             local _, _, collected = MRP.Util.GetMountInfoSafe(mount)
             if not collected and MRP_CharacterSettings.filter.collectedStates[collected] and self:IsMountAllowed(step, mount) then
+                if step.source.type == "OpenWorld" and mount.itemId == 43962 then grettaSelected = true end
                 if isNetherwing(step, mount) then
                     self.netherwingChoice = math.min(self.netherwingChoice or mount.itemId, mount.itemId)
                 end
@@ -32,6 +33,10 @@ function P:PrepareWaveContext(steps)
                 end
             end
         end
+    end
+    if self.grettaSelected ~= grettaSelected then
+        self.grettaSelected = grettaSelected
+        self:StartDailyResetWatch()
     end
     for _, drake in ipairs(self.netherwingDrakes) do
         if onQuest(drake.quest) then self.netherwingChoice = drake.item; break end
@@ -70,12 +75,8 @@ end
 
 local grettaDailies = { 13422, 13423, 13424, 13425 }
 local function grettaOffer()
-    local guid = UnitGUID and UnitGUID("npc")
-    if not guid or tonumber(guid:match("%-(%d+)%-%x+$")) ~= 29796
-        or not (C_GossipInfo and C_GossipInfo.GetAvailableQuests) then return nil end
-    for _, offer in ipairs(C_GossipInfo.GetAvailableQuests() or {}) do
-        for _, id in ipairs(grettaDailies) do if offer.questID == id then return id end end
-    end
+    local offers = P.dailyResetAt and P.dailyOffers and P.dailyOffers["storm.gretta.daily"]
+    for _, id in ipairs(grettaDailies) do if offers and offers[id] then return id end end
 end
 local getAvailability = P.GetMountAvailability
 function P:GetMountAvailability(step, mount)
@@ -97,7 +98,7 @@ function P:GetMountAvailability(step, mount)
             if onQuest(id) then return { state = "available", message = "" } end
         end
         for _, id in ipairs(grettaDailies) do
-            if self:IsQuestComplete(id) then
+            if self:IsDailyComplete(id) then
                 return { state = "waiting", message = MRP.L["Gretta's daily is complete for this reset. Check again after the daily reset."], quests = {} }
             end
         end
@@ -150,15 +151,15 @@ function P:GetRouteOverride(step)
         step.runtimeLocation = true
         for _, id in ipairs(grettaDailies) do
             if onQuest(id) then
-                step.acquisitionQuest = { questID = id, scope = "character", turnIn = { mapID = 120, x = 50.8, y = 65.6 } }
+                step.acquisitionQuest = MRP.Util.ShallowCopy(self.dailyQuests[id])
                 break
             end
         end
         local offer = grettaOffer()
         if offer and not step.acquisitionQuest then
-            step.acquisitionQuest = { questID = offer, scope = "character", mapID = 120, x = 50.8, y = 65.6,
-                turnIn = { mapID = 120, x = 50.8, y = 65.6 } }
+            step.acquisitionQuest = MRP.Util.ShallowCopy(self.dailyQuests[offer])
         end
+        if step.acquisitionQuest then step.acquisitionQuest.dailyResetAt = self.dailyResetAt end
         copyMounts(step, "Check Gretta for today's rotating daily. Hyldnir Spoils is its reward; the bag is not an object to click in the village.")
     end
     return step

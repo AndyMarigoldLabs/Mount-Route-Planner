@@ -88,3 +88,12 @@ P.hodirMounts = rewards
 
 P:RegisterBinding({ sourceType = "Vendor", npcID = 32540, source = lillehoff, rewards = rewards })
 P:RegisterBinding({ sourceType = "OpenWorld", itemID = 43962, source = { requirements = C("storm.gretta") } })
+
+-- Acquisition dailies share live offers and reset-scoped completions with the
+-- farming loops, without requiring a reputation/currency farming opt-in.
+P:RegisterDailyGroup("storm.gretta.daily", { name = "Gretta the Arbiter", npcID = 29796,
+    mapID = 120, x = 50.8, y = 65.6, rotation = true, evidence = P.chains["storm.gretta"].evidence,
+    quests = { { questID = 13422, name = "Maintaining Discipline" },
+        { questID = 13423, name = "Defending Your Title" },
+        { questID = 13424, name = "Back to the Pit" },
+        { questID = 13425, name = "The Aberrations Must Die" } } })

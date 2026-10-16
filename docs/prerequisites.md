@@ -138,12 +138,15 @@ ready together. The two Hodir end branches, Mending Fences and the item-started
 Refiner's Fire, can also progress independently after Sibling Rivalry.
 
 Gretta's path prepares the full rotation, rather than claiming that every daily
-has the same minimum unlock. A daily actually offered by Gretta's gossip dialog
-or already accepted is direct evidence of access and takes precedence over that
+has the same minimum unlock. A daily actually offered by Gretta's gossip,
+quest greeting or direct quest detail, or already accepted, is evidence of access and takes precedence over that
 preparation path. The addon does not guess today's rotating quest from a calendar.
-After completing one of 13422–13425, this source waits for the game's daily flags
-to reset. Permanent unlock progress is separate; no local 24-hour timer is used.
-Accepted dailies follow native waypoints, then Gretta for turn-in.
+After completing one of 13422–13425, this source waits for the realm's daily reset.
+It uses the same reset-scoped turn-in observations and offer snapshots as the
+farming loops. A selected, uncollected polar bear keeps the reset watcher running
+even with all farming opt-ins off. Permanent unlock progress stays separate.
+Accepted dailies follow native waypoints, then Gretta for turn-in, including when
+the completion API still reports an older completion.
 
 ## Retail coverage: Netherwing
 
@@ -279,13 +282,19 @@ counts toward the budget.
 ## Availability and daily resets
 
 An unvisited NPC appears as **Daily quest giver**, not as a promise that every
-candidate is available. The gossip list resolves the visit into the quests
-actually offered. A directly opened quest detail also confirms that single
-offer. No calendar-based rotation is assumed. An empty list removes the visit
+candidate is available. The gossip or quest greeting list resolves the visit into
+the quests actually offered. A directly opened quest detail also confirms that
+single offer. No calendar-based rotation is assumed. An empty list from an identified giver removes the visit
 for this reset; interacting with the NPC again, completing a permanent unlock,
 or changing reputation rechecks availability. Accepted quests use native
 objective waypoints and curated turn-in coordinates. Where objective waypoints
 are unavailable, the panel points to the quest log instead of inventing a location.
+
+Quest greetings use `GetNumAvailableQuests()` / `GetAvailableQuestInfo(index)`
+and the `questnpc` unit, separately from `C_GossipInfo` and the `npc` unit. When
+an object exposes no unit GUID, listed quest IDs prove only those offers; an
+empty anonymous list cannot remove a different giver's visit. Observing a known
+offer does not enable any farming option.
 
 The reset boundary comes from `GetServerTime()` plus
 `C_DateAndTime.GetSecondsUntilDailyReset()`. A cancellable timer checks at most
@@ -302,6 +311,64 @@ When reset time cannot be read, new daily visits wait while accepted quests
 remain routable. The timer retries. This avoids inventing a local midnight or a
 24-hour period based on when a player last completed a quest. Server schedule
 changes invalidate observations; small countdown rounding differences do not.
+
+## Retail API audit (2026-10-16)
+
+The prerequisite resolver, daily loops, farming targets, collection helper,
+quest navigation and event dispatch were checked against Blizzard's Retail UI
+source and generated API declarations, mirrored at
+[`b9be9379719047977fca4dba1bb1d9988e8840b3`](https://github.com/Gethe/wow-ui-source/tree/b9be9379719047977fca4dba1bb1d9988e8840b3).
+
+Confirmed issues fixed:
+
+- The Argent Hippogryph binding passed both `UnitFactionGroup` returns into a
+  helper. Lua treated the localized faction name as a class restriction, hiding
+  the mount from eligible characters and omitting its 150-seal cost from farming
+  targets. The binding now passes only the invariant faction tag.
+- Missing mount journal data fell through to spellbook presence and item counts.
+  Retail now uses only the journal's collection flag; an unlearned item or an
+  unknown override spell cannot mark a mount collected. The purchase planners
+  still handle bought-but-unlearned items separately. Missing journal results
+  retain the normal uncollected fallback until journal data is available.
+- `QUEST_GREETING` was unhandled. Daily offers now use the greeting's fifth
+  `GetAvailableQuestInfo` return and `questnpc`, rather than a stale gossip list.
+  Positive offers work even when an object has no unit GUID.
+- Gretta's acquisition quests bypassed the daily resolver. A lagging completion
+  flag could remove navigation for an accepted or offered daily, direct offers
+  were missed, and reset refresh depended on unrelated events. Her four dailies
+  now share the offer, turn-in and reset handling used by the farming loops.
+
+Verified API contracts:
+
+| API | Verified interpretation |
+| --- | --- |
+| Unit identity | Faction uses return 1; race/class use invariant return 2. Multi-return faction values must not flow into an optional class argument. |
+| `GetMountInfoByID` | Collection is return 11; interior nil fields, usability and active state do not change it. The API may return nothing. |
+| `GetFactionDataByID` | `reaction` is rank 1–8; `currentStanding` is points (fixed in the preceding Hodir change). |
+| `GetCurrencyInfo` | `quantity` is spendable balance; lifetime earnings and tracking fields are not a purchase budget. Missing data pauses farming. |
+| `C_Item.GetItemCount` | Carried quest seals exclude banks and charges. Purchase targets include personal bank items, excluding account-bank items. Ownership does not imply learned collection. |
+| `C_QuestLog` completion | Objective completion, character turn-in and account turn-in remain separate. Missing account APIs never fall back to character flags. |
+| `GetNextWaypoint` | Returns map ID plus normalized x/y, or nothing; coordinates are converted once, with curated turn-in and quest-log fallbacks. |
+| Quest/currency events | Retail `QUEST_ACCEPTED` supplies a single quest ID. Turn-in XP/money and removal's replay flag are ignored. Nullable currency event fields trigger a fresh balance read. |
+| Daily reset | Server timestamp plus reset countdown defines the boundary; no local date, midnight or elapsed 24-hour assumption. |
+
+The tests call the real collection helper using all 13 journal returns, separate
+gossip/greeting fixtures, localized versus invariant race/class names, full
+currency records and item counts that honor the API's location flags. New cases
+cover both factions' Hippogryph eligibility and budgets, missing journal data,
+empty and anonymous greetings, event arguments,
+Gretta's stale flags, direct offers, reset recovery and watcher cancellation.
+The regressions reproduce the pre-fix failures, including two existing integration
+failures exposed by the two-return faction fixture. The full suite has 140
+passing tests when supplied with the published data. These are contract fixtures,
+not captures from a running Retail client.
+
+Primary API references: [mount journal](https://github.com/Gethe/wow-ui-source/blob/b9be9379719047977fca4dba1bb1d9988e8840b3/Interface/AddOns/Blizzard_APIDocumentationGenerated/MountJournalDocumentation.lua),
+[spellbook](https://github.com/Gethe/wow-ui-source/blob/b9be9379719047977fca4dba1bb1d9988e8840b3/Interface/AddOns/Blizzard_APIDocumentationGenerated/SpellBookDocumentation.lua),
+[items](https://github.com/Gethe/wow-ui-source/blob/b9be9379719047977fca4dba1bb1d9988e8840b3/Interface/AddOns/Blizzard_APIDocumentationGenerated/ItemDocumentation.lua),
+[gossip](https://github.com/Gethe/wow-ui-source/blob/b9be9379719047977fca4dba1bb1d9988e8840b3/Interface/AddOns/Blizzard_APIDocumentationGenerated/GossipInfoDocumentation.lua),
+[Retail QuestFrame](https://github.com/Gethe/wow-ui-source/blob/b9be9379719047977fca4dba1bb1d9988e8840b3/Interface/AddOns/Blizzard_UIPanels_Game/Mainline/QuestFrame.lua),
+and [unit identity](https://github.com/Gethe/wow-ui-source/blob/b9be9379719047977fca4dba1bb1d9988e8840b3/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua).
 
 ## Deliberately excluded / needs in-game verification
 
@@ -466,12 +533,15 @@ quest guidance, auto-advance on/off, map pins and TomTom/native waypoints, and t
 Revered versus Exalted purchases. Then verify:
 
 - Gretta alone and alongside Lillehoff, a live daily offered before the full
-  preparation path, active daily objectives/turn-in, and the next daily reset.
+  preparation path, gossip versus quest greeting versus direct detail, active
+  daily objectives/turn-in with stale completion flags, and the next daily reset
+  with the farming opt-ins off.
 - Netherwing before Neutral, at each promotion boundary, the flight to Shattrath,
   one free choice, and the Hurlunk destination for remaining colors.
 - `/mrp dailies on` while below Friendly and after each promotion; visit Yarzill
   and the Taskmaster, then the mines and Mudlump after their setup quests. Check
-  an empty gossip list, an offered daily, and a directly opened quest detail.
+  empty gossip and quest greeting lists, an offered daily, and a directly opened
+  quest detail. Verify object greetings with no exposed unit GUID as well.
 - Both Tournament factions: three mastery quests, seal waits across a reset,
   one city Champion, a second city with the first still active, and all five
   Crusader milestones. Compare Paladin Charger eligibility with another class.

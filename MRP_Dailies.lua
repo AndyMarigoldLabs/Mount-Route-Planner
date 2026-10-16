@@ -6,7 +6,8 @@ local function onQuest(id) return C_QuestLog and C_QuestLog.IsOnQuest and C_Ques
 local function enabled()
     return WOW_PROJECT_ID == WOW_PROJECT_MAINLINE and MRP_CharacterSettings
         and ((MRP_CharacterSettings.includePrerequisiteQuests and MRP_CharacterSettings.includePrerequisiteDailies)
-            or MRP_CharacterSettings.includeChampionSealFarming or MRP_CharacterSettings.includeHodirReputationFarming)
+            or MRP_CharacterSettings.includeChampionSealFarming or MRP_CharacterSettings.includeHodirReputationFarming
+            or P.grettaSelected)
 end
 
 function P:RegisterDailyGroup(id, group)
@@ -81,16 +82,44 @@ function P:CanRetainCompletedQuest(q)
     return self:IsRoutedQuestComplete(q) == true
 end
 
-function P:CaptureDailyOffers()
-    if not enabled() or not self.dailyResetAt or not (C_GossipInfo and C_GossipInfo.GetAvailableQuests) then return end
-    local guid = UnitGUID and UnitGUID("npc")
+function P:RecordDailyOffer(id)
+    local daily = self.dailyQuests[id]
+    if not daily or not self.dailyResetAt then return end
+    self.dailyOffers = self.dailyOffers or {}
+    local snapshot = self.dailyOffers[daily.dailyGroupID] or {}
+    snapshot[id] = true
+    self.dailyOffers[daily.dailyGroupID] = snapshot
+    MRP_CharacterSettings.prerequisiteDailyState.completed[id] = nil
+end
+
+function P:CaptureDailyOffers(event)
+    if not self.dailyResetAt then return end
+    local offered, unit = {}, "npc"
+    if event == "QUEST_GREETING" then
+        -- QuestFrame's greeting API is separate from C_GossipInfo. Its quest ID
+        -- is the fifth return, and its unit is questnpc (often absent for objects).
+        if not (GetNumAvailableQuests and GetAvailableQuestInfo) then return end
+        unit = "questnpc"
+        for i = 1, GetNumAvailableQuests() do
+            local _, _, _, _, id = GetAvailableQuestInfo(i)
+            if id then offered[id] = true end
+        end
+    else
+        if not (C_GossipInfo and C_GossipInfo.GetAvailableQuests) then return end
+        local available = C_GossipInfo.GetAvailableQuests()
+        if type(available) ~= "table" then return end
+        for _, q in ipairs(available) do offered[q.questID] = true end
+    end
+    local guid = UnitGUID and UnitGUID(unit)
+    if not guid then
+        -- IDs prove positive offers even without a unit. An empty anonymous
+        -- list cannot establish that any particular giver has no quests.
+        for id in pairs(offered) do self:RecordDailyOffer(id) end
+        return
+    end
     local giverID = guid and tonumber(guid:match("%-(%d+)%-%x+$"))
     local kind = guid and guid:match("^(%a+)%-")
     if not giverID or (kind ~= "Creature" and kind ~= "Vehicle" and kind ~= "GameObject") then return end
-    local available = C_GossipInfo.GetAvailableQuests()
-    if type(available) ~= "table" then return end
-    local offered = {}
-    for _, q in ipairs(available) do offered[q.questID] = true end
     self.dailyOffers = self.dailyOffers or {}
     for id, group in pairs(self.dailyGroups) do
         if (kind == "GameObject" and group.objectID == giverID) or (kind ~= "GameObject" and group.npcID == giverID) then
@@ -124,20 +153,12 @@ function P:HandleDailyEvent(event, questID)
     if event == "UPDATE_FACTION" or (event == "QUEST_TURNED_IN" and not q) then
         -- Promotions can open a previously empty quest list.
         self.dailyOffers = {}
-    elseif event == "GOSSIP_SHOW" then
-        self:CaptureDailyOffers()
-    elseif event == "QUEST_DETAIL" and enabled() and self.dailyResetAt and GetQuestID then
+    elseif event == "GOSSIP_SHOW" or event == "QUEST_GREETING" then
+        self:CaptureDailyOffers(event)
+    elseif event == "QUEST_DETAIL" and self.dailyResetAt and GetQuestID then
         -- Some quest givers open a quest directly without a gossip list. A detail
         -- page proves this offer only; it says nothing about their other quests.
-        local id = GetQuestID()
-        local daily = self.dailyQuests[id]
-        if daily then
-            self.dailyOffers = self.dailyOffers or {}
-            local snapshot = self.dailyOffers[daily.dailyGroupID] or {}
-            snapshot[id] = true
-            self.dailyOffers[daily.dailyGroupID] = snapshot
-            MRP_CharacterSettings.prerequisiteDailyState.completed[id] = nil
-        end
+        self:RecordDailyOffer(GetQuestID())
     end
 end
 

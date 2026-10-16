@@ -24,9 +24,39 @@ local completed, account, accepted, objectives, waypoints, collected, timers, fr
 local standing, faction, combat, displayUpdates, race, class, reputations, items
 local serverNow, serverReset, resetKnown, resetTimers, gossipNPC, gossipQuests, detailQuest
 local seals, currencyKnown
+local journal, greetingNPC, greetingQuests, knownSpells, bookSpells
+-- Retail API contracts: preserve nil tuple slots, separate quest dialogs, and
+-- count only the item locations requested by the caller. Do not stub Util.
+C_MountJournal = { GetMountInfoByID = function(id)
+    if journal[id] == false then return end -- MayReturnNothing
+    if journal[id] then return unpack(journal[id], 1, 13) end
+    return "Mount " .. id, 60000 + id, 132248, false, true, 2,
+        false, false, nil, false, collected[id] or false, id, true
+end }
+C_SpellBook = {
+    IsSpellKnown = function(id) return knownSpells[id] or false end,
+    IsSpellInSpellBook = function(id) return bookSpells[id] or false end,
+}
+local function gossipQuest(id)
+    return { title = "Daily " .. id, questLevel = 30, isTrivial = true,
+        frequency = 1, repeatable = false, isComplete = false, isLegendary = false,
+        isIgnored = false, questID = id, isImportant = false, isMeta = false, questInfoID = 0 }
+end
+function GetNumAvailableQuests() return #greetingQuests end
+function GetAvailableQuestInfo(index)
+    local q = greetingQuests[index]
+    return q.isTrivial, q.frequency, q.repeatable, q.isLegendary, q.questID,
+        q.isImportant, q.isMeta, q.questInfoID
+end
 C_CurrencyInfo = { GetCurrencyInfo = function(id)
     equal(id, 241)
-    if currencyKnown then return { quantity = seals, totalEarned = 99999, quantityEarnedThisWeek = 99999 } end
+    if currencyKnown then return { name = "Champion's Seal", description = "Argent Tournament currency.", currencyID = 241,
+        isHeader = false, isHeaderExpanded = false, currencyListDepth = 1, isTypeUnused = false,
+        isShowInBackpack = false, quantity = seals, trackedQuantity = 0, iconFileID = 236246,
+        maxQuantity = 0, canEarnPerWeek = false, quantityEarnedThisWeek = 0, isTradeable = false,
+        quality = 1, maxWeeklyQuantity = 0, totalEarned = 99999, discovered = true,
+        useTotalEarnedForMaxQty = false, isAccountWide = false, isAccountTransferable = false,
+        rechargingCycleDurationMS = 0, rechargingAmountPerCycle = 0 } end
 end }
 function GetServerTime() return serverNow end
 C_DateAndTime = { GetSecondsUntilDailyReset = function() return resetKnown and math.max(0, serverReset - serverNow) or nil end }
@@ -34,9 +64,18 @@ WOW_PROJECT_ID, WOW_PROJECT_MAINLINE = 1, 1
 format = string.format
 FACTION_STANDING_LABEL7, FACTION_STANDING_LABEL8 = "Revered", "Exalted"
 SlashCmdList = {}
-function UnitFactionGroup() return faction end
-function UnitRace() return race, race end
-function UnitClass() return class, class end
+-- German display names exercise the invariant tokens used by the resolver.
+function UnitFactionGroup() return faction, faction == "Alliance" and "Allianz" or faction end
+function UnitRace()
+    local names = { Human = "Mensch", Orc = "Orc", Worgen = "Worgen" }
+    local ids = { Human = 1, Orc = 2, Worgen = 22 }
+    return names[race] or race, race, ids[race] or 0
+end
+function UnitClass()
+    local names = { WARRIOR = "Krieger", PALADIN = "Paladin", DEATHKNIGHT = "Todesritter" }
+    local ids = { WARRIOR = 1, PALADIN = 2, DEATHKNIGHT = 6 }
+    return names[class] or class, class, ids[class] or 0
+end
 function InCombatLockdown() return combat end
 function CreateFrame()
     local frame = { events = {}, scripts = {} }
@@ -70,7 +109,12 @@ C_Reputation = { GetFactionDataByID = function(id)
     local points = { -42000, -6000, -3000, 0, 3000, 9000, 21000, 42000 }
     return { name = "Faction " .. id, reaction = rank, currentStanding = points[rank] + 100 }
 end }
-C_Item = { GetItemCount = function(id) return items[id] or 0 end }
+C_Item = { GetItemCount = function(id, bank, uses, reagentBank, accountBank)
+    local item = items[id] or 0
+    if type(item) == "number" then return item end
+    return (uses and item.uses or item.bags or 0) + (bank and item.bank or 0)
+        + (reagentBank and item.reagentBank or 0) + (accountBank and item.accountBank or 0)
+end }
 time = os.time
 C_UnitAuras = { GetPlayerAuraBySpellID = function() return nil end }
 Enum = { UIMapType = { Continent = 2 } }
@@ -106,7 +150,6 @@ loadRuntime("MRP_Filter.lua")
 loadRuntime("MRP_Route.lua")
 loadRuntime("MRP_Core.lua")
 local P, F, R = MRP.Prerequisites, MRP.Filter, MRP.Route
-MRP.Util.GetMountInfoSafe = function(mount) return mount.name, 1, collected[mount.id] or false end
 
 local function mount(id, itemID)
     return { id = id, itemId = itemID, name = "Mount " .. id, source = { allowedDifficultyIds = { -1 }, uiMapIds = { 120 }, mapId = 0 } }
@@ -119,7 +162,15 @@ local function reset()
     serverNow, serverReset, resetKnown, resetTimers = 10000, 20000, true, {}
     seals, currencyKnown = 0, true
     gossipNPC, gossipQuests, detailQuest = nil, {}, nil
+    journal, knownSpells, bookSpells, greetingQuests, greetingNPC = {}, {}, {}, {}, nil
+    UnitGUID = function(unit)
+        local id = unit == "questnpc" and greetingNPC or (unit == "npc" and gossipNPC)
+        return id and ("Creature-0-3131-571-9001-" .. id .. "-000012ABCD") or nil
+    end
+    C_GossipInfo = { GetAvailableQuests = function() return gossipQuests end }
+    GetQuestID = function() return detailQuest or 0 end
     P.dailyTimer, P.dailyOffers, P.dailyResetAt = nil, {}, nil
+    P.grettaSelected = nil
     loadRuntime("MRP_CharacterSettings.lua")
     MRP_CharacterSettings.filter.sourceTypes.Vendor = true
     MRP_CharacterSettings.filter.holidays.none = true
@@ -458,7 +509,8 @@ test("a live Gretta offer bypasses rotation preparation, but not unknown declare
     reset()
     local bear = source(500, "OpenWorld", nil, 43962)
     UnitGUID = function() return "Creature-0-1-571-1-29796-0000000001" end
-    C_GossipInfo = { GetAvailableQuests = function() return { { questID = 13423 } } end }
+    C_GossipInfo = { GetAvailableQuests = function() return { gossipQuest(13423) } end }
+    frames[1].scripts.OnEvent(nil, "GOSSIP_SHOW"); flush()
     local route = expand({ bear })
     equal(#route, 1); equal(route[1].acquisitionQuest.questID, 13423)
     equal(P:GetNavigationEntry(route[1]).x, 50.8)
@@ -466,6 +518,7 @@ test("a live Gretta offer bypasses rotation preparation, but not unknown declare
     equal(#expand({ bear }), 0)
     equal(P.diagnostics[1].status.state, "unknown")
     bear.requirements = nil
+    P.dailyOffers = {} -- no saved observation of Gretta in this case
     UnitGUID = function() return "Creature-0-1-571-1-12345-0000000001" end
     equal(expand({ bear })[1].prerequisiteQuest.questID, 12843)
     UnitGUID, C_GossipInfo = nil, nil
@@ -713,6 +766,22 @@ test("Argent Hippogryph uses an unlocked city vendor rather than the generic coo
     equal(#route, 1); equal(P:GetNavigationEntry(route[1]).npcID, 33310)
 end)
 
+test("Hippogryph faction API extra returns never become a class restriction or remove its seal budget", function()
+    for _, side in ipairs({ "Alliance", "Horde" }) do
+        reset(); faction = side
+        local hippogryph = source(701, "Vendor", nil, 45725)
+        hippogryph.mounts[1].source.cost = { type = "currency", currencyId = 241, amount = 150 }
+        local _, reward = P:GetSupplement(hippogryph, hippogryph.mounts[1])
+        equal(reward.faction, side); equal(reward.class, nil)
+        equal(P:IsMountAllowed(hippogryph, hippogryph.mounts[1]), true)
+        MRP_CharacterSettings.includeChampionSealFarming = true
+        P:PrepareWaveContext({ hippogryph }); P:PrepareChampionBudget({ hippogryph })
+        equal(P.championBudget.count, 1); equal(P.championBudget.total, 150)
+        local route = expand({ hippogryph })
+        equal(route[1].prerequisiteQuest.questID, side == "Alliance" and 13667 or 13668)
+    end
+end)
+
 test("account achievements and quest flags cannot grant Tournament character eligibility", function()
     reset(); standing = 8
     for _, city in ipairs(P.tournamentCities) do account[city[7]], account[city[8]] = true, true end
@@ -830,9 +899,6 @@ end
 -- Exercise daily loops through the same filter, events and timer as the addon.
 local function dailySetup(kind)
     reset()
-    UnitGUID = function() return gossipNPC and ("Creature-0-0-0-0-" .. gossipNPC .. "-0000000000") end
-    C_GossipInfo = { GetAvailableQuests = function() return gossipQuests end }
-    GetQuestID = function() return detailQuest end
     MRP_CharacterSettings.filter.sourceTypes.Quest = true
     MRP.Data.STEPS = { kind == "netherwing" and source(710, "Quest", nil, 32857) or source(711, "Vendor", 33307, 45125) }
     if kind == "netherwing" then completed[11014], completed[11019] = true, true
@@ -841,13 +907,13 @@ local function dailySetup(kind)
 end
 local function offer(groupID, ids)
     gossipNPC, gossipQuests = P.dailyGroups[groupID].npcID, {}
-    for _, id in ipairs(ids) do gossipQuests[#gossipQuests + 1] = { questID = id } end
+    for _, id in ipairs(ids) do gossipQuests[#gossipQuests + 1] = gossipQuest(id) end
     frames[1].scripts.OnEvent(nil, "GOSSIP_SHOW"); flush()
     gossipNPC = nil
 end
 local function turnIn(id)
     accepted[id], objectives[id] = nil, nil
-    frames[1].scripts.OnEvent(nil, "QUEST_TURNED_IN", id); flush()
+    frames[1].scripts.OnEvent(nil, "QUEST_TURNED_IN", id, 22050, 132300); flush()
 end
 local function nextDay()
     serverNow, serverReset = serverReset + 1, serverReset + 86400
@@ -1708,6 +1774,137 @@ if arg[1] then
         end
     end)
 end
+
+test("Retail mount collection comes from the eleventh journal return, including false", function()
+    reset()
+    local m = vendor.mounts[2]
+    m.spellId = 59799; knownSpells[59799], bookSpells[59799], items[m.itemId] = true, true, 1
+    journal[m.id] = { "Ice Mammoth", 59799, 236237, true, true, 2, true, false, nil, true, false, m.id, true }
+    local name, icon, learned = MRP.Util.GetMountInfoSafe(m)
+    equal(name, "Ice Mammoth"); equal(icon, 236237); equal(learned, false)
+    journal[m.id][4], journal[m.id][5], journal[m.id][10], journal[m.id][11] = false, false, false, true
+    equal(select(3, MRP.Util.GetMountInfoSafe(m)), true)
+end)
+
+test("missing Retail journal data cannot turn an unlearned item or a spellbook entry into collection", function()
+    reset()
+    local m = vendor.mounts[2]; m.spellId = 59799; journal[m.id] = false
+    bookSpells[59799] = true -- this API can return true for an unknown override spell
+    equal(select(3, MRP.Util.GetMountInfoSafe(m)), false)
+    bookSpells[59799] = nil; items[m.itemId] = { accountBank = 1 }
+    equal(select(3, MRP.Util.GetMountInfoSafe(m)), false)
+    items[m.itemId] = { bags = 1 }
+    equal(select(3, MRP.Util.GetMountInfoSafe(m)), false)
+end)
+
+test("item requirements count carried seals, excluding banks and charges", function()
+    reset()
+    items[45192] = { bags = 14, bank = 20, reagentBank = 30, accountBank = 40, uses = 50 }
+    equal(P:Evaluate({ type = "item", id = 45192, count = 15 }), false)
+    items[45192].bags = 15
+    equal(P:Evaluate({ type = "item", id = 45192, count = 15 }), true)
+end)
+
+test("farming targets distinguish personal purchases from account-bank items and learned mounts", function()
+    hodirSetup()
+    items[43961] = { bank = 1 }; F:Apply()
+    equal(P.hodirTarget.rank, 7); equal(P.hodirTarget.count, 1)
+    equal(select(3, MRP.Util.GetMountInfoSafe(vendor.mounts[4])), false)
+    items[43961] = { accountBank = 1 }; F:Apply()
+    equal(P.hodirTarget.rank, 8); equal(P.hodirTarget.count, 2)
+    championSetup()
+    local reward = MRP.Data.STEPS[1].mounts[1]
+    items[reward.itemId] = { bank = 1 }; F:Apply(); equal(P.championBudget.total, 0)
+    items[reward.itemId] = { accountBank = 1 }; F:Apply(); equal(P.championBudget.total, 100)
+end)
+
+test("Retail QUEST_GREETING uses questnpc and the fifth quest-info return, not gossip", function()
+    dailySetup("netherwing")
+    assert(frames[1].events.QUEST_GREETING)
+    local group = "netherwing.daily.yarzill"
+    gossipNPC, gossipQuests = 99999, { gossipQuest(11016) } -- unrelated stale gossip
+    greetingNPC, greetingQuests = P.dailyGroups[group].npcID, { gossipQuest(11020), gossipQuest(11035) }
+    frames[1].scripts.OnEvent(nil, "QUEST_GREETING"); flush()
+    local ids = questIDs(F.filteredSteps)
+    assert(ids[11020] and ids[11035]); assert(not ids[11015] and not ids[11016])
+    assert(not dailyChecks(F.filteredSteps)[group])
+    greetingQuests = {}; frames[1].scripts.OnEvent(nil, "QUEST_GREETING"); flush()
+    assert(not questIDs(F.filteredSteps)[11020] and not dailyChecks(F.filteredSteps)[group])
+    nextDay(); assert(dailyChecks(F.filteredSteps)[group])
+end)
+
+test("Retail quest events use a quest ID, while currency events trigger a fresh balance query", function()
+    dailySetup("netherwing")
+    offer("netherwing.daily.yarzill", { 11020, 11035 })
+    accepted[11020] = true
+    frames[1].scripts.OnEvent(nil, "QUEST_ACCEPTED", 11020); flush()
+    assert(questIDs(F.filteredSteps)[11020])
+    equal(P.dailyOffers["netherwing.daily.yarzill"][11020], nil)
+    equal(P.dailyOffers["netherwing.daily.yarzill"][11035], true)
+    accepted[11020] = nil
+    frames[1].scripts.OnEvent(nil, "QUEST_REMOVED", 11020, false); flush()
+    equal(P.dailyOffers["netherwing.daily.yarzill"], nil)
+    championSetup()
+    seals = 75
+    frames[1].scripts.OnEvent(nil, "CURRENCY_DISPLAY_UPDATE", 241, 75, 5, 1, 0); flush()
+    equal(P.championBudget.quantity, 75); equal(P.championBudget.remaining, 25)
+    seals = 100
+    frames[1].scripts.OnEvent(nil, "CURRENCY_DISPLAY_UPDATE", nil, nil, nil, nil, nil); flush()
+    equal(P.championBudget.quantity, 100); equal(P.championBudget.remaining, 0)
+end)
+
+test("an object greeting without a unit GUID proves only its listed daily", function()
+    hodirSetup(nil, false)
+    greetingQuests = { gossipQuest(12981) }
+    frames[1].scripts.OnEvent(nil, "QUEST_GREETING"); flush()
+    assert(questIDs(F.filteredSteps)[12981])
+    equal(MRP_CharacterSettings.hodirDailyAccess["storm.hodir.daily.cold"], true)
+    equal(MRP_CharacterSettings.hodirDailyAccess["storm.hodir.daily.horn"], nil)
+    greetingQuests = {}; frames[1].scripts.OnEvent(nil, "QUEST_GREETING"); flush()
+    assert(questIDs(F.filteredSteps)[12981], "unknown giver cannot retract another giver's offer")
+end)
+
+test("missing greeting APIs leave existing offers and accepted objectives intact", function()
+    hodirSetup(); accepted[12981], waypoints[12981] = true, { 120, 0.75, 0.5 }
+    local api = GetAvailableQuestInfo
+    GetAvailableQuestInfo = nil
+    frames[1].scripts.OnEvent(nil, "QUEST_GREETING"); flush()
+    GetAvailableQuestInfo = api
+    assert(questIDs(F.filteredSteps)[12981])
+    local loc, phase = P:GetQuestDestination(P.dailyQuests[12981])
+    equal(phase, "objective"); equal(loc.x, 75)
+end)
+
+test("Gretta's accepted daily survives a stale completion flag and stays navigable", function()
+    reset()
+    local bear = source(500, "OpenWorld", nil, 43962)
+    accepted[13423], completed[13423], waypoints[13423] = true, true, { 120, 0.5, 0.7 }
+    local route = expand({ bear })
+    local loc, phase = P:GetQuestDestination(route[1].acquisitionQuest)
+    equal(phase, "objective"); equal(loc.y, 70)
+end)
+
+test("Gretta observes direct offers, bridges turn-in lag and refreshes at reset without farming opt-ins", function()
+    reset()
+    MRP_CharacterSettings.filter.sourceTypes.OpenWorld = true
+    MRP.Data.STEPS = { source(500, "OpenWorld", nil, 43962) }
+    F:Apply()
+    completed[13423] = true -- completion cache may lag a live offer
+    detailQuest = 13423; frames[1].scripts.OnEvent(nil, "QUEST_DETAIL", 0); flush()
+    equal(#F.filteredSteps, 1)
+    equal(F:GetCurrentStep().acquisitionQuest.questID, 13423)
+    equal(P:GetNavigationEntry(F:GetCurrentStep()).x, 50.8)
+    detailQuest, completed[13423] = nil, nil
+    turnIn(13423); equal(#F.filteredSteps, 0)
+    completed[12886], completed[12925] = true, true
+    nextDay(); equal(#F.filteredSteps, 1)
+    assert(not MRP_CharacterSettings.includePrerequisiteDailies)
+    assert(not MRP_CharacterSettings.includeChampionSealFarming)
+    assert(not MRP_CharacterSettings.includeHodirReputationFarming)
+    local timer = P.dailyTimer
+    MRP_CharacterSettings.filter.sourceTypes.OpenWorld = false; F:Apply()
+    equal(P.dailyTimer, nil); assert(timer.cancelled)
+end)
 
 print(string.format("%d tests, %d failures", tests, failures))
 os.exit(failures == 0 and 0 or 1)
