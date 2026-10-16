@@ -1,5 +1,11 @@
 # Mount Route Planner (MRP)
 
+This fork adds opt-in prerequisite quest routing, initially covering Lillehoff's
+Sons of Hodir unlock chain and the Ice Mammoth purchase requirements. Enable
+**Include prerequisite quest chains** in Settings or run `/mrp prerequisites on`.
+See [prerequisite routing](docs/prerequisites.md) for coverage, testing and local
+build instructions.
+
 **Mount Route Planner (MRP)** is an advanced World of Warcraft addon designed for mount collectors who want to farm efficiently and with minimal hassle.
 
 MRP automatically generates optimized farming routes based on your character's current collection, available travel options, and location. No more manually copying data from external websites—just open the addon and start farming.

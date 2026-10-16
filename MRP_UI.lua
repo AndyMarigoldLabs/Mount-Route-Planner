@@ -736,11 +736,6 @@ function UI:ShowPathfindingWarnings()
 end
 
 function UI:UpdateDisplay()
-    if not frame:IsShown() then
-        MRP.Map:UpdateOverlay()
-        return
-    end
-
     local steps = MRP.Filter.filteredSteps
     local idx = MRP_CharacterSettings.currentStep
     local step = steps[idx]
@@ -760,6 +755,11 @@ function UI:UpdateDisplay()
         hasSuperTrackedUserWaypoint = false
     end
 
+    if not frame:IsShown() then
+        self:ClearCurrentPathfindingData()
+        return
+    end
+
     if frame.rewardIcons then
         for _, icon in ipairs(frame.rewardIcons) do
             icon:Hide()
@@ -771,6 +771,7 @@ function UI:UpdateDisplay()
     frame.rewardIcons = {}
 
     if not step then
+        self:ClearCurrentPathfindingData()
         frame.stepText:SetText("")
         frame.stepInfoButton:Hide()
         frame.stepPathfindingText:SetTextColor(1, 0.6, 0.6)
@@ -1121,7 +1122,29 @@ function UI:UpdateDisplay()
         frame.noteText:SetText((frame.noteText:GetText() or "") .. "\n\n|cffff0000" .. warningText .. "|r")
     end
 
-    local entry = MRP.Util.GetStepEntry(step)
+    local entry = MRP.Prerequisites:GetNavigationEntry(step)
+
+    if step.prerequisiteQuest then
+        local quest = step.prerequisiteQuest
+        local _, phase = MRP.Prerequisites:GetQuestDestination(quest)
+        local action = phase == "accept" and L["Accept"] or (phase == "turnIn" and L["Turn in"] or L["Complete objectives for"])
+        local message = string.format(L["%s %s (%d) to unlock the mounts shown above."], action, MRP.Prerequisites:GetQuestName(quest), quest.questID)
+        if phase == "completed" then
+            message = L["Quest complete. Use Next to continue."]
+        else
+            if quest.note then message = message .. "\n" .. quest.note end
+            if not entry then message = message .. "\n" .. L["No verified quest waypoint is available. Follow the quest log; the mount source remains locked."] end
+        end
+        frame.noteText:SetText((frame.noteText:GetText() or "") .. "\n" .. message)
+    else
+        for _, mount in ipairs(step.mounts) do
+            local status = MRP.Prerequisites:GetMountAvailability(step, mount)
+            if status.unverified then
+                frame.noteText:SetText((frame.noteText:GetText() or "") .. "\n" .. L["Quest prerequisites for this source have not been verified."])
+                break
+            end
+        end
+    end
 
     -- Show warnings for any unmet conditions (faction, warfront, reputation, holiday, …)
     local conditions = MRP.Util.GetStepConditions(step)
@@ -1140,24 +1163,6 @@ function UI:UpdateDisplay()
         frame.stepInfoButton:Hide()
     end
     frame.stepPathfindingText:SetText("")
-
-    -- For quest chains, override entry coordinates to the current quest step's location
-    if entry and step.source.type == MRP.FilterSourceType.Quest then
-        local questChain = step.mounts[1] and step.mounts[1].source.questChain
-        if questChain and #questChain > 0 then
-            for _, qStep in ipairs(questChain) do
-                if not C_QuestLog.IsQuestFlaggedCompleted(qStep.questID) then
-                    if qStep.x and qStep.y then
-                        entry = MRP.Util.ShallowCopy(entry)
-                        entry.x = qStep.x
-                        entry.y = qStep.y
-                        if qStep.mapID then entry.mapID = qStep.mapID end
-                    end
-                    break
-                end
-            end
-        end
-    end
 
     if isInPvP then
         frame.stepPathfindingText:SetTextColor(1, 0.6, 0.6)
@@ -1238,12 +1243,11 @@ function UI:UpdateCurrentPathfinding(entry)
 
     local newPathKey = nil
     if optimizedPath then
-        for i, node in ipairs(optimizedPath) do
-            if i == 1 then
-                newPathKey = node.id
-            else
-                newPathKey = newPathKey .. ";" .. node.id
-            end
+        -- Trail node IDs can stay the same while a quest changes its objective
+        -- or turn-in point. Include the actual destination and quest phase.
+        newPathKey = table.concat({ entry.mapID, entry.x, entry.y, entry.navigationKey or "" }, ":")
+        for _, node in ipairs(optimizedPath) do
+            newPathKey = newPathKey .. ";" .. node.id
         end
     end
 
@@ -1290,6 +1294,9 @@ end
 ---@param step Step
 ---@return string
 function UI:GetLocalizedStepName(step)
+    if step.prerequisiteQuest then
+        return string.format(L["Unlock quest: %s"], MRP.Prerequisites:GetQuestName(step.prerequisiteQuest))
+    end
     for _, mount in ipairs(step.mounts) do
         if mount.source.journalEncounter then
             if step.source.type == MRP.FilterSourceType.WorldBoss then

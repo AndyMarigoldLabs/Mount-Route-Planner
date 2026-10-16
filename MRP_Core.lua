@@ -122,6 +122,10 @@ end
 ---@param difficultyId number?
 ---@return boolean defeated
 function Core:IsEncounterDefeated(mount, source, difficultyId)
+    if source.prerequisiteQuest then
+        local quest = source.prerequisiteQuest
+        return MRP.Prerequisites:IsQuestComplete(quest.questID, quest.scope) == true
+    end
     if source.type == MRP.FilterSourceType.WorldBoss then
         if mount.source.journalEncounter then
             local expectedEncounterName = EJ_GetEncounterInfo(mount.source.journalEncounter.id)
@@ -283,6 +287,10 @@ end
 ---@param condition string
 ---@return string
 function Core:GetConditionMessage(condition)
+    local questID = condition:match("^quest_(%d+)$") or condition:match("^quest_account_(%d+)$")
+    if questID then
+        return MRP.Prerequisites:Describe({ type = "quest", id = tonumber(questID) })
+    end
     if condition == "timewalking_any" then
         return L["Requires an active Timewalking event."]
     end
@@ -305,7 +313,11 @@ function Core:GetConditionMessage(condition)
         return format(L["Requires %s reputation with %s."], standingName, factionName)
     end
 
-    return L["condition_" .. condition]
+    local message = L["condition_" .. condition]
+    if message == "condition_" .. condition then
+        return string.format(L["Unknown requirement: %s"], condition)
+    end
+    return message
 end
 
 ---@param step Step
@@ -315,10 +327,22 @@ function Core:ShouldSkipStep(step)
         return false
     end
 
+    if step.prerequisiteQuest then
+        local quest = step.prerequisiteQuest
+        return MRP.Prerequisites:IsQuestComplete(quest.questID, quest.scope) == true
+    end
+
     -- Skip steps where any condition is unmet (faction, warfront, reputation, holiday, …)
     if not MRP.Util.AreStepConditionsMet(step) then
         return true
     end
+
+    local eligible = false
+    for _, mount in ipairs(step.mounts) do
+        local status = MRP.Prerequisites:GetMountAvailability(step, mount)
+        if status.state == "available" or status.unverified then eligible = true; break end
+    end
+    if not eligible then return true end
 
     local bestDifficulties = MRP.Core:GetMostSuitableDifficultyIds(step)
     if #bestDifficulties > 0 then
@@ -516,6 +540,9 @@ function Core:GetNoStepMessage()
         return addon_issue_checkers[MRP.RequiredAddon.MRPData].message
     end
 
+    if MRP.Prerequisites.diagnostics and #MRP.Prerequisites.diagnostics > 0 then
+        return L["Selected mounts have unmet prerequisites.\nUse /mrp prerequisites status for details, or enable prerequisite quest chains in Settings."]
+    end
     return L["No step found.\nAdjust your filter."]
 end
 
@@ -780,6 +807,10 @@ function Core:InitializeSettings()
         MRP_CharacterSettings.autoAdvance = true
     end
 
+    if MRP_CharacterSettings.includePrerequisiteQuests == nil then
+        MRP_CharacterSettings.includePrerequisiteQuests = false
+    end
+
     if MRP_CharacterSettings.currentStep == nil then
         MRP_CharacterSettings.currentStep = 1
     end
@@ -870,7 +901,25 @@ watcher:RegisterEvent("UPDATE_INSTANCE_INFO")
 watcher:RegisterEvent("ZONE_CHANGED")
 watcher:RegisterEvent("ZONE_CHANGED_INDOORS")
 watcher:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+watcher:RegisterEvent("QUEST_TURNED_IN")
+watcher:RegisterEvent("QUEST_LOG_UPDATE")
+watcher:RegisterEvent("QUEST_ACCEPTED")
+watcher:RegisterEvent("QUEST_REMOVED")
+watcher:RegisterEvent("UPDATE_FACTION")
+watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
 watcher:SetScript("OnEvent", function(_, event)
+    if event == "QUEST_TURNED_IN" or event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED"
+        or event == "QUEST_REMOVED" or event == "UPDATE_FACTION"
+        or (event == "PLAYER_REGEN_ENABLED" and MRP.Prerequisites.refreshAfterCombat) then
+        MRP.Prerequisites:QueueRefresh()
+        return
+    end
+    if event == "NEW_MOUNT_ADDED" or event == "MERCHANT_CLOSED" then MRP.Prerequisites:QueueRefresh() end
+    local current = MRP.Filter:GetCurrentStep()
+    if current and current.prerequisiteQuest and Core:ShouldSkipStep(current) then
+        MRP.Prerequisites:QueueRefresh()
+        return
+    end
     Core:CheckForPathfindingWarnings(event)
     Core:CheckRaidInfo(event)
     Core:CheckForDisplayUpdate(event)
@@ -887,6 +936,7 @@ local f = CreateFrame("Frame")
 f:RegisterEvent("PLAYER_LOGIN")
 f:SetScript("OnEvent", function()
     Core:InitializeSettings()
+    MRP.Prerequisites.ready = true
     Core:FilterTimewalkingSteps()
     MRP.Filter:Apply(true)
 
@@ -969,6 +1019,11 @@ function Core:HandleSlashCommand(msg)
     elseif cmd == "route" then
         MRP.Route:Calculate()
         print(L["|cff00ff00[MRP]|r Route recalculated."])
+    elseif cmd == "prerequisites" then
+        if arg1 == "on" or arg1 == "off" then
+            MRP.Prerequisites:SetEnabled(arg1 == "on")
+        end
+        MRP.Prerequisites:PrintStatus()
     elseif cmd == "updatedisplaydelayed" then
         C_Timer.After(tonumber(arg1) or 0.25, function() MRP.UI:UpdateDisplay() end)
     else
@@ -982,6 +1037,7 @@ function Core:HandleSlashCommand(msg)
         print(L[" - /mrp update → Show official download sources"])
         print(L[" - /mrp versions → Print addon and library versions"])
         print(L[" - /mrp route → Recalculate the optimized route"])
+        print(L[" - /mrp prerequisites on|off|status → Route unlock quests or list blocked mounts"])
         print(L[" - /mrp updatedisplaydelayed <number> → Force update of the display after a delay (default: 0.25 seconds)"])
     end
 end

@@ -33,19 +33,7 @@ end
 ---@param step Step
 ---@return table? entry
 function Route:GetStepEntry(step)
-    if step.source.type == MRP.FilterSourceType.Dungeon then
-        return MRP.Data.DUNGEONS[step.source.name]
-    elseif step.source.type == MRP.FilterSourceType.Raid then
-        return MRP.Data.RAIDS[step.source.name]
-    elseif step.source.type == MRP.FilterSourceType.WorldBoss then
-        return MRP.Data.WORLD_BOSSES[step.source.name]
-    elseif step.source.type == MRP.FilterSourceType.OpenWorld
-        or step.source.type == MRP.FilterSourceType.Quest
-        or step.source.type == MRP.FilterSourceType.Treasure
-        or step.source.type == MRP.FilterSourceType.Vendor then
-        return MRP.Data.OPEN_WORLD[step.source.name]
-    end
-    return nil
+    return MRP.Prerequisites:GetNavigationEntry(step)
 end
 
 --- Check if the saved baseline route order covers all current steps.
@@ -73,11 +61,17 @@ end
 --- Reorder filteredSteps based on the saved baseline route order.
 --- Called automatically by Filter:UpdateFilteredSteps() whenever filters change.
 function Route:ApplyToFilteredSteps()
+    local steps = MRP.Filter.filteredSteps
+    for _, step in ipairs(steps) do
+        if step.prerequisiteQuest then
+            MRP.Filter.filteredSteps = self:OrderSteps(steps)
+            return
+        end
+    end
     if not MRP_CharacterSettings.routeOrder or #MRP_CharacterSettings.routeOrder == 0 then
         return
     end
 
-    local steps = MRP.Filter.filteredSteps
     if #steps == 0 then return end
 
     local orderMap = {}
@@ -88,6 +82,7 @@ function Route:ApplyToFilteredSteps()
     table.sort(steps, function(a, b)
         local posA = orderMap[a.id] or math.huge
         local posB = orderMap[b.id] or math.huge
+        if posA == posB then return tostring(a.id) < tostring(b.id) end
         return posA < posB
     end)
 end
@@ -95,10 +90,12 @@ end
 ---@return Location playerLocation
 function Route:GetPlayerLocation()
     local uiMapId = C_Map.GetBestMapForUnit("player")
-    local uiMapCoords = C_Map.GetPlayerMapPosition(C_Map.GetBestMapForUnit("player"), "player")
+    if not uiMapId then return nil end
+    local uiMapCoords = C_Map.GetPlayerMapPosition(uiMapId, "player")
 
     if not uiMapCoords then
-        local parentMapId = C_Map.GetMapInfo(uiMapId).parentMapID
+        local info = C_Map.GetMapInfo(uiMapId)
+        local parentMapId = info and info.parentMapID
         if parentMapId then
             uiMapId = parentMapId
 
@@ -122,22 +119,16 @@ function Route:GetPlayerLocation()
     return { mapId = uiMapId, pos = { x = uiMapCoords.x, y = uiMapCoords.y, z = 0 }, isUI = true }
 end
 
---- Calculate optimized baseline route using nearest-neighbor heuristic grouped by continent.
---- Operates on ALL steps (MRP.Steps) to create an ordering independent of filters.
-function Route:Calculate()
-    local steps = MRP.Data.STEPS
-    if #steps == 0 then
-        MRP_CharacterSettings.routeOrder = nil
-        return
-    end
-
+--- Order supplied destinations using nearest-neighbor routing grouped by continent.
+--- Runtime prerequisite stops use their current quest destination.
+function Route:OrderSteps(steps)
     -- Gather world positions and continent info for each step
     local continentGroups = {}
     local noLocSteps = {}
 
     for _, step in ipairs(steps) do
         local entry = self:GetStepEntry(step)
-        if entry and entry.mapID then
+        if entry and entry.mapID and entry.x and entry.y then
             local continent = self:GetContinentForMap(entry.mapID)
             if continent then
                 local _, worldPos = C_Map.GetWorldPosFromMapPos(entry.mapID, CreateVector2D(entry.x / 100, entry.y / 100))
@@ -183,6 +174,7 @@ function Route:Calculate()
         if a.id == b.id then return false end
         if a.id == playerContinent then return true end
         if b.id == playerContinent then return false end
+        if a.count == b.count then return a.id < b.id end
         return a.count > b.count
     end)
 
@@ -234,6 +226,16 @@ function Route:Calculate()
     for _, step in ipairs(noLocSteps) do
         orderedSteps[#orderedSteps + 1] = step
     end
+
+    return orderedSteps
+end
+
+function Route:Calculate()
+    if #MRP.Data.STEPS == 0 then
+        MRP_CharacterSettings.routeOrder = nil
+        return
+    end
+    local orderedSteps = self:OrderSteps(MRP.Data.STEPS)
 
     -- Save the baseline route order as array of step IDs
     local routeIds = {}

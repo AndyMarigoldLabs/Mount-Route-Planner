@@ -254,6 +254,26 @@ recalculateRouteBtn:SetScript("OnClick", function()
 end)
 
 local cachedHelpfulItems = {}
+local prerequisiteToggle = CreateFrame("CheckButton", nil, optionsFrame, "InterfaceOptionsCheckButtonTemplate")
+prerequisiteToggle:SetPoint("TOPLEFT", recalculateRouteBtn, "BOTTOMLEFT", 0, -16)
+prerequisiteToggle.Text:SetText(L["Include prerequisite quest chains"])
+prerequisiteToggle:SetScript("OnClick", function(self)
+    MRP.Prerequisites:SetEnabled(self:GetChecked())
+end)
+prerequisiteToggle:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(L["Include prerequisite quest chains"], 1, 1, 1)
+    GameTooltip:AddLine(L["Route the next unfinished unlock quest for selected mounts. Character-specific; disabled by default. Reputation requirements still apply to purchases."], 1, 1, 1, true)
+    GameTooltip:Show()
+end)
+prerequisiteToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+local prerequisiteStatus = CreateFrame("Button", nil, optionsFrame, "UIPanelButtonTemplate")
+prerequisiteStatus:SetSize(210, 24)
+prerequisiteStatus:SetPoint("TOPLEFT", prerequisiteToggle, "BOTTOMLEFT", 0, -8)
+prerequisiteStatus:SetText(L["Show blocked mount requirements"])
+prerequisiteStatus:SetScript("OnClick", function() MRP.Prerequisites:PrintStatus() end)
+
 local ignoredHelpfulItemScrollFrame = nil
 local ignoredHelpfulItemToggles = {}
 
@@ -605,6 +625,7 @@ alertFrame:SetScript("OnShow", function()
 end)
 
 optionsFrame:SetScript("OnShow", function()
+    prerequisiteToggle:SetChecked(MRP_CharacterSettings.includePrerequisiteQuests)
     UIDropDownMenu_SetText(waypointSystemDropdown, GetWaypointSystemLabel(MRP_Settings.waypointSystem))
     UpdateWaypointWarning()
     showDifficultyWarningToggle:SetChecked(MRP_Settings.showDifficultyWarning)

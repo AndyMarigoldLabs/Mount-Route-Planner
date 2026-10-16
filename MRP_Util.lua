@@ -138,7 +138,7 @@ end
 -- =====================================================================
 
 --- Condition types returned by GetStepConditions.
----@alias ConditionType "faction"|"warfront"|"reputation"|"holiday"|"timewalking"
+---@alias ConditionType "faction"|"warfront"|"reputation"|"holiday"|"timewalking"|"quest"|"unknown"
 
 ---@class StepCondition
 ---@field type ConditionType
@@ -150,6 +150,7 @@ end
 ---@param step Step
 ---@return table?
 function Util.GetStepEntry(step)
+    if step.entry then return step.entry end
     local t = step.source.type
     local name = step.source.name
     if t == MRP.FilterSourceType.Dungeon then
@@ -206,7 +207,7 @@ function Util.GetStepConditions(step)
                 local factionData = C_Reputation and C_Reputation.GetFactionDataByID and C_Reputation.GetFactionDataByID(factionId)
                 met = factionData and factionData.currentStanding >= requiredStanding or false
             else
-                met = true
+                met = false
             end
         elseif key:find("^event_") then
             condType = "holiday"
@@ -218,9 +219,14 @@ function Util.GetStepConditions(step)
             condType = "timewalking"
             local expansion = tonumber(key:match("^timewalking_(%d+)$"))
             met = expansion ~= nil and MRP.Core:GetActiveTimewalkingMap()[expansion] or false
+        elseif key:find("^quest_") then
+            condType = "quest"
+            local accountID = key:match("^quest_account_(%d+)$")
+            local id = accountID or key:match("^quest_(%d+)$")
+            met = id ~= nil and MRP.Prerequisites:IsQuestComplete(tonumber(id), accountID and "account" or "character") == true
         else
-            condType = "faction"
-            met = true
+            condType = "unknown"
+            met = false
         end
         table.insert(conditions, {
             type = condType,

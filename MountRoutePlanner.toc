@@ -62,6 +62,8 @@ MRP_Data.lua
 MRP_Farstrider.lua
 
 MRP_Util.lua
+MRP_Prerequisites.lua
+Data\MRP_PrerequisiteData.lua
 MRP_Update.lua
 
 MRP_Filter.lua

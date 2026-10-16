@@ -10,6 +10,34 @@ if not MRPData.Internal then return end
 ---@field mapID number the uiMapID of the entry
 ---@field expansionLevel number the expansionLevel of the entry
 ---@field conditions string[]? an optional array of condition keys (faction, warfront, reputation, holiday, …)
+---@field requirements AcquisitionRequirement? acquisition gates, independent of questID lockout tracking
+---@field unlockSteps UnlockQuest[]? ordered quests that satisfy this entry's requirements
+
+---@class AcquisitionRequirement
+---@field type "quest"|"reputation"? leaf requirement type
+---@field id number? quest ID
+---@field name string? fallback quest name
+---@field scope "character"|"account"? quest completion scope (defaults to character)
+---@field factionID number? reputation faction ID
+---@field standing number? standard reputation rank (1-8)
+---@field allOf AcquisitionRequirement[]? all child requirements must pass
+---@field anyOf AcquisitionRequirement[]? at least one child requirement must pass
+
+---@class QuestLocation
+---@field mapID number UI map ID
+---@field x number map percentage (0-100)
+---@field y number map percentage (0-100)
+
+---@class UnlockQuest : QuestLocation
+---@field questID number
+---@field name string? fallback quest name
+---@field scope "character"|"account"? defaults to character
+---@field faction "Alliance"|"Horde"? omit for both
+---@field requires AcquisitionRequirement? dependency gate for this quest
+---@field accept QuestLocation? overrides the top-level quest-giver coordinates
+---@field objective QuestLocation? fallback when Blizzard has no active waypoint
+---@field turnIn QuestLocation? fallback for a finished quest awaiting turn-in
+---@field note string? quest-specific instructions
 
 ---@class Dungeon : BaseEntry
 ---@field instanceId number the instanceID (mapID)
@@ -71,6 +99,8 @@ if not MRPData.Internal then return end
 ---@field mapID number? the uiMapID of the quest source
 
 ---@class MountSource
+---@field requirements AcquisitionRequirement? requirements specific to this mount
+---@field unlockSteps UnlockQuest[]? ordered unlock quests for this mount
 ---@field mapId number the mapID of the source
 ---@field uiMapIds number[] the uiMapIDs of the source
 ---@field allowedDifficultyIds number[] the allowed difficulty IDs for the source
@@ -95,13 +125,19 @@ if not MRPData.Internal then return end
 ---@field source MountSource the source details of the mount
 
 ---@class StepSource
+---@field prerequisiteQuest UnlockQuest? present only on runtime prerequisite steps
 ---@field type FilterSourceType the type of the source
 ---@field name string the name of the source
 ---@field npcID number? the npcID used for nearby detection when available
 ---@field targetName string? the exact targetable NPC name when it differs from the source/encounter name
 
 ---@class Step
----@field id number the stepID
+---@field id number|string the stepID (runtime prerequisite IDs are strings)
+---@field requirements AcquisitionRequirement? additional source requirements
+---@field unlockSteps UnlockQuest[]? ordered unlock quests
+---@field prerequisiteQuest UnlockQuest? current prerequisite, if this is a runtime quest stop
+---@field targetStepIDs table<number, boolean>? source steps unlocked by this quest
+---@field entry BaseEntry? runtime location; not written into generated source tables
 ---@field mounts Mount[] the list of mounts in this step
 ---@field source StepSource the source details of the step
 ---@field expansion number the expansion of the step

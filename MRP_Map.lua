@@ -1055,17 +1055,7 @@ end
 
 -- Look up the data entry for a step
 local function GetStepEntry(step)
-    local t = step.source.type
-    if t == MRP.FilterSourceType.Dungeon then
-        return MRP.Data.DUNGEONS[step.source.name]
-    elseif t == MRP.FilterSourceType.Raid then
-        return MRP.Data.RAIDS[step.source.name]
-    elseif t == MRP.FilterSourceType.WorldBoss then
-        return MRP.Data.WORLD_BOSSES[step.source.name]
-    elseif t == MRP.FilterSourceType.OpenWorld or t == MRP.FilterSourceType.Quest or t == MRP.FilterSourceType.Treasure or t == MRP.FilterSourceType.Vendor then
-        return MRP.Data.OPEN_WORLD[step.source.name]
-    end
-    return nil
+    return MRP.Prerequisites:GetNavigationEntry(step)
 end
 
 local function GetOrCreateRouteLine(index, canvas)

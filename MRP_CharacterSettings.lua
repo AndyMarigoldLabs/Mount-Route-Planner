@@ -4,6 +4,7 @@
 ---@class CharacterSettings
 ---@field autoSkip boolean Whether to automatically skip steps in the route.
 ---@field autoAdvance boolean Whether to automatically advance to the next step after completing the current one.
+---@field includePrerequisiteQuests boolean Whether to route known mount unlock quests (opt-in).
 ---@field currentStep number The current step in the route being followed.
 ---@field filter FilterSettings The filter settings for the character.
 ---@field ignoredHelpfulItems { number: boolean } A list of helpful items to ignore for this character.
@@ -11,6 +12,7 @@
 MRP_CharacterSettings = {
     autoSkip = true,
     autoAdvance = true,
+    includePrerequisiteQuests = false,
     currentStep = 1,
     filter = {
         expansions = {

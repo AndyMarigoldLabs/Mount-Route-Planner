@@ -201,6 +201,7 @@ function Filter:UpdateFilteredSteps()
     end
 
     -- Apply saved baseline route order if available
+    self.filteredSteps = MRP.Prerequisites:ExpandSteps(self.filteredSteps)
     if MRP.Route then
         MRP.Route:ApplyToFilteredSteps()
     end
@@ -215,7 +216,7 @@ function Filter:EnsureInBounds()
 end
 
 ---@param onLoad boolean?
-function Filter:Apply(onLoad)
+function Filter:Apply(onLoad, questUpdate)
     if onLoad then
         self:BuildAvailability()
         self:UpdateFilteredSteps()
@@ -234,10 +235,35 @@ function Filter:Apply(onLoad)
     self:UpdateFilteredSteps()
 
     if oldStep then
+        -- Keep a completed quest visible until Next when auto-advance is disabled.
+        if questUpdate and oldStep.prerequisiteQuest and not MRP_CharacterSettings.autoAdvance
+            and MRP_CharacterSettings.includePrerequisiteQuests
+            and MRP.Prerequisites:IsQuestComplete(oldStep.prerequisiteQuest.questID, oldStep.prerequisiteQuest.scope) then
+            local insertAt = math.min(oldStepNumber, #self.filteredSteps + 1)
+            for i, step in ipairs(self.filteredSteps) do
+                local related = oldStep.targetStepIDs[step.id]
+                for id in pairs(step.targetStepIDs or {}) do related = related or oldStep.targetStepIDs[id] end
+                if related then insertAt = i; break end
+            end
+            table.insert(self.filteredSteps, insertAt, oldStep)
+        end
+        local found = false
         for i, step in ipairs(self.filteredSteps) do
-            if step == oldStep then
+            if step.id == oldStep.id then
                 MRP_CharacterSettings.currentStep = i
+                found = true
                 break
+            end
+        end
+        -- Follow the chain to its next quest or unlocked mount source, even if
+        -- geographical ordering moved it elsewhere in the route.
+        if not found then
+            for i, step in ipairs(self.filteredSteps) do
+                local related = oldStep.targetStepIDs and oldStep.targetStepIDs[step.id]
+                for id in pairs(step.targetStepIDs or {}) do
+                    related = related or id == oldStep.id or (oldStep.targetStepIDs and oldStep.targetStepIDs[id])
+                end
+                if related then MRP_CharacterSettings.currentStep = i; break end
             end
         end
     else
@@ -255,4 +281,4 @@ function Filter:Apply(onLoad)
     end
 end
 
-Filter:Apply()
+-- Initial filtering runs at PLAYER_LOGIN, after all modules and saved settings load.
