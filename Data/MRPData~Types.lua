@@ -31,7 +31,7 @@ if not MRPData.Internal then return end
 ---@field y number map percentage (0-100)
 
 ---@class UnlockQuest : QuestLocation
----@field questID number
+---@field questID number? omitted for a daily quest-giver check
 ---@field name string? fallback quest name
 ---@field scope "character"|"account"? defaults to character
 ---@field faction "Alliance"|"Horde"? omit for both
@@ -42,6 +42,23 @@ if not MRPData.Internal then return end
 ---@field objective QuestLocation? fallback when Blizzard has no active waypoint
 ---@field turnIn QuestLocation? fallback for a finished quest awaiting turn-in
 ---@field note string? quest-specific instructions
+---@field daily boolean? completion resets with the server daily boundary
+---@field dailyGroupID string? authored daily group for this quest
+---@field dailyGroup string? runtime visit to check the NPC's actual daily offers
+---@field dailyResetAt number? server reset boundary attached to a runtime daily step
+
+---@class DailyQuestGroup : QuestLocation
+---@field id string stable group key
+---@field name string quest giver or daily group label
+---@field npcID number stable quest-giver identity
+---@field evidence string reviewed source URL
+---@field quests UnlockQuest[] verified candidates, not assumed simultaneous offers
+---@field faction "Alliance"|"Horde"? omit for both
+---@field requires AcquisitionRequirement? eligibility gate (does not initiate this path)
+---@field prepare AcquisitionRequirement? one-time setup path after the eligibility gate
+---@field rotation boolean? at most one alternative may be available/completed per reset
+---@field note string? daily progress instructions
+---@field invalid boolean? registry validation failed
 
 ---@class UnlockChain
 ---@field requirements AcquisitionRequirement terminal condition; satisfied terminals bypass history

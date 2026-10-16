@@ -18,6 +18,7 @@ function Prerequisites:IsQuestComplete(id, scope)
 end
 
 function Prerequisites:GetQuestName(quest)
+    if quest.dailyGroup then return quest.name end
     local title = C_QuestLog and C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(quest.questID or quest.id)
     return title or quest.name or string.format(L["Quest %d"], quest.questID or quest.id)
 end
@@ -89,11 +90,17 @@ local function validLocation(loc)
 end
 
 function Prerequisites:GetQuestDestination(quest)
-    if self:IsQuestComplete(quest.questID, quest.scope) == true then return nil, "completed" end
+    if quest.dailyGroup then
+        local loc = MRP.Util.ShallowCopy(quest)
+        loc.navigationKey = "daily-check:" .. quest.dailyGroup .. ":" .. tostring(quest.dailyResetAt)
+        return loc, "check"
+    end
+    if self:IsRoutedQuestComplete(quest) == true then return nil, "completed" end
     local onQuest = C_QuestLog and C_QuestLog.IsOnQuest and C_QuestLog.IsOnQuest(quest.questID)
     local phase = onQuest and "objective" or "accept"
     if onQuest and C_QuestLog.IsComplete and C_QuestLog.IsComplete(quest.questID) then phase = "turnIn" end
     local navigationKey = (quest.scope or "character") .. ":" .. quest.questID .. ":" .. phase
+    if quest.daily then navigationKey = navigationKey .. ":" .. tostring(quest.dailyResetAt) end
     -- Blizzard's waypoint follows objectives/turn-in and can point across maps.
     if onQuest and C_QuestLog.GetNextWaypoint then
         local mapID, x, y = C_QuestLog.GetNextWaypoint(quest.questID)
@@ -200,6 +207,10 @@ function Prerequisites:GetMountAvailability(step, mount)
 end
 
 function Prerequisites:MakeQuestStep(quest, parent, mount)
+    if quest.daily or quest.dailyGroup then
+        quest = MRP.Util.ShallowCopy(quest)
+        quest.dailyResetAt = self.dailyResetAt
+    end
     local entry = self:GetQuestDestination(quest)
     local questName = self:GetQuestName(quest)
     local reward = MRP.Util.ShallowCopy(mount)
@@ -210,7 +221,9 @@ function Prerequisites:MakeQuestStep(quest, parent, mount)
         factionMask = mount.source.factionMask,
     }
     return {
-        id = "prerequisite:" .. (quest.scope or "character") .. ":" .. quest.questID,
+        id = quest.dailyGroup and ("daily-check:" .. quest.dailyGroup .. ":" .. tostring(self.dailyResetAt))
+            or ((quest.daily and "daily:" or "prerequisite:") .. (quest.scope or "character") .. ":" .. quest.questID
+                .. (quest.daily and (":" .. tostring(self.dailyResetAt)) or "")),
         source = { type = MRP.FilterSourceType.Quest, name = questName, prerequisiteQuest = quest },
         expansion = parent.expansion, mounts = { reward }, prerequisiteQuest = quest,
         targetStepIDs = { [parent.id] = true }, entry = entry or {},
@@ -220,6 +233,7 @@ end
 -- Only ready prerequisite quests of each selected source enter the route.
 -- Locked vendors are withheld, so geography can never put one before its unlock.
 function Prerequisites:ExpandSteps(steps)
+    self:SyncDailyReset()
     if self.PrepareWaveContext then self:PrepareWaveContext(steps) end
     local result, quests, diagnostics = {}, {}, {}
     for _, step in ipairs(steps) do
@@ -308,6 +322,7 @@ end
 
 function Prerequisites:SetEnabled(enabled)
     MRP_CharacterSettings.includePrerequisiteQuests = enabled == true
+    self:StartDailyResetWatch()
     MRP.Filter:Apply()
 end
 

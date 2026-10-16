@@ -1128,7 +1128,14 @@ function UI:UpdateDisplay()
         local quest = step.prerequisiteQuest or step.acquisitionQuest
         local _, phase = MRP.Prerequisites:GetQuestDestination(quest)
         local action = phase == "accept" and L["Accept"] or (phase == "turnIn" and L["Turn in"] or L["Complete objectives for"])
-        local message = string.format(L["%s %s (%d) to unlock the mounts shown above."], action, MRP.Prerequisites:GetQuestName(quest), quest.questID)
+        local message
+        if quest.dailyGroup then
+            message = string.format(L["Check today's available dailies: %s. Talk to the quest giver to update this route."], quest.name)
+        elseif quest.daily then
+            message = string.format(L["%s daily: %s (%d)."], action, MRP.Prerequisites:GetQuestName(quest), quest.questID)
+        else
+            message = string.format(L["%s %s (%d) to unlock the mounts shown above."], action, MRP.Prerequisites:GetQuestName(quest), quest.questID)
+        end
         if step.acquisitionQuest then message = string.format(L["%s %s (%d)."], action, MRP.Prerequisites:GetQuestName(quest), quest.questID) end
         if phase == "completed" then
             message = L["Quest complete. Use Next to continue."]
@@ -1296,6 +1303,8 @@ end
 ---@return string
 function UI:GetLocalizedStepName(step)
     if step.prerequisiteQuest then
+        if step.prerequisiteQuest.dailyGroup then return string.format(L["Daily quest giver: %s"], step.prerequisiteQuest.name) end
+        if step.prerequisiteQuest.daily then return string.format(L["Daily quest: %s"], MRP.Prerequisites:GetQuestName(step.prerequisiteQuest)) end
         return string.format(L["Unlock quest: %s"], MRP.Prerequisites:GetQuestName(step.prerequisiteQuest))
     end
     for _, mount in ipairs(step.mounts) do

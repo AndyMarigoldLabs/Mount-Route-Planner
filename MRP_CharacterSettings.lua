@@ -5,6 +5,8 @@
 ---@field autoSkip boolean Whether to automatically skip steps in the route.
 ---@field autoAdvance boolean Whether to automatically advance to the next step after completing the current one.
 ---@field includePrerequisiteQuests boolean Whether to route known mount unlock quests (opt-in).
+---@field includePrerequisiteDailies boolean Whether to route daily progress for known unlocks (opt-in).
+---@field prerequisiteDailyState table? Character-local completions with a server reset expiry.
 ---@field currentStep number The current step in the route being followed.
 ---@field filter FilterSettings The filter settings for the character.
 ---@field ignoredHelpfulItems { number: boolean } A list of helpful items to ignore for this character.
@@ -13,6 +15,7 @@ MRP_CharacterSettings = {
     autoSkip = true,
     autoAdvance = true,
     includePrerequisiteQuests = false,
+    includePrerequisiteDailies = false,
     currentStep = 1,
     filter = {
         expansions = {

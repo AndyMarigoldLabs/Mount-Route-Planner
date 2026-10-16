@@ -266,6 +266,22 @@ MRP.L = {
   ["You have collected this mount"] = "You have collected this mount"
 };
 
+-- Opt-in daily progress for curated unlock chains.
+for _, text in ipairs({
+  "Include reputation and unlock seal dailies",
+  "Route Netherwing reputation and Aspirant's/Valiant's Seal dailies for selected mounts. Enables prerequisite quest chains. Daily progress resets with the server; permanent unlocks are kept.",
+  "Unlock dailies are enabled.",
+  "Unlock dailies are disabled.",
+  " - /mrp dailies on|off|status → Route Netherwing reputation and Tournament unlock seal dailies",
+  "Check today's available dailies: %s. Talk to the quest giver to update this route.",
+  "%s daily: %s (%d).",
+  "Daily quest giver: %s",
+  "Daily quest: %s",
+  "No eligible dailies remain available. Check again after the daily reset.",
+  "Daily reset time is unavailable. Accepted quests can still be completed.",
+  "Daily availability could not be verified. Check the quest giver or quest log.",
+}) do MRP.L[text] = text end
+
 setmetatable(MRP.L, {
   __index = function(t, k)
     rawset(t, k, k); return k;

@@ -124,7 +124,7 @@ end
 function Core:IsEncounterDefeated(mount, source, difficultyId)
     if source.prerequisiteQuest then
         local quest = source.prerequisiteQuest
-        return MRP.Prerequisites:IsQuestComplete(quest.questID, quest.scope) == true
+        return MRP.Prerequisites:IsRoutedQuestComplete(quest) == true
     end
     if source.type == MRP.FilterSourceType.WorldBoss then
         if mount.source.journalEncounter then
@@ -329,7 +329,7 @@ function Core:ShouldSkipStep(step)
 
     if step.prerequisiteQuest then
         local quest = step.prerequisiteQuest
-        return MRP.Prerequisites:IsQuestComplete(quest.questID, quest.scope) == true
+        return MRP.Prerequisites:IsRoutedQuestComplete(quest) == true
     end
 
     -- Skip steps where any condition is unmet (faction, warfront, reputation, holiday, …)
@@ -810,6 +810,9 @@ function Core:InitializeSettings()
     if MRP_CharacterSettings.includePrerequisiteQuests == nil then
         MRP_CharacterSettings.includePrerequisiteQuests = false
     end
+    if MRP_CharacterSettings.includePrerequisiteDailies == nil then
+        MRP_CharacterSettings.includePrerequisiteDailies = false
+    end
 
     if MRP_CharacterSettings.currentStep == nil then
         MRP_CharacterSettings.currentStep = 1
@@ -909,10 +912,16 @@ watcher:RegisterEvent("UPDATE_FACTION")
 watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
 watcher:RegisterEvent("GOSSIP_SHOW")
 watcher:RegisterEvent("GOSSIP_CLOSED")
-watcher:SetScript("OnEvent", function(_, event)
+watcher:RegisterEvent("QUEST_DETAIL")
+watcher:SetScript("OnEvent", function(_, event, ...)
+    MRP.Prerequisites:HandleDailyEvent(event, ...)
+    if event == "PLAYER_ENTERING_WORLD" then
+        MRP.Prerequisites:StartDailyResetWatch()
+        MRP.Prerequisites:QueueRefresh()
+    end
     if event == "QUEST_TURNED_IN" or event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED"
         or event == "QUEST_REMOVED" or event == "UPDATE_FACTION"
-        or event == "GOSSIP_SHOW" or event == "GOSSIP_CLOSED"
+        or event == "GOSSIP_SHOW" or event == "GOSSIP_CLOSED" or event == "QUEST_DETAIL"
         or (event == "PLAYER_REGEN_ENABLED" and MRP.Prerequisites.refreshAfterCombat) then
         MRP.Prerequisites:QueueRefresh()
         return
@@ -940,6 +949,7 @@ f:RegisterEvent("PLAYER_LOGIN")
 f:SetScript("OnEvent", function()
     Core:InitializeSettings()
     MRP.Prerequisites.ready = true
+    MRP.Prerequisites:StartDailyResetWatch()
     Core:FilterTimewalkingSteps()
     MRP.Filter:Apply(true)
 
@@ -1027,6 +1037,11 @@ function Core:HandleSlashCommand(msg)
             MRP.Prerequisites:SetEnabled(arg1 == "on")
         end
         MRP.Prerequisites:PrintStatus()
+    elseif cmd == "dailies" then
+        if arg1 == "on" or arg1 == "off" then MRP.Prerequisites:SetDailiesEnabled(arg1 == "on") end
+        print(MRP_CharacterSettings.includePrerequisiteQuests and MRP_CharacterSettings.includePrerequisiteDailies
+            and L["Unlock dailies are enabled."] or L["Unlock dailies are disabled."])
+        MRP.Prerequisites:PrintStatus()
     elseif cmd == "updatedisplaydelayed" then
         C_Timer.After(tonumber(arg1) or 0.25, function() MRP.UI:UpdateDisplay() end)
     else
@@ -1041,6 +1056,7 @@ function Core:HandleSlashCommand(msg)
         print(L[" - /mrp versions → Print addon and library versions"])
         print(L[" - /mrp route → Recalculate the optimized route"])
         print(L[" - /mrp prerequisites on|off|status → Route unlock quests or list blocked mounts"])
+        print(L[" - /mrp dailies on|off|status → Route Netherwing reputation and Tournament unlock seal dailies"])
         print(L[" - /mrp updatedisplaydelayed <number> → Force update of the display after a delay (default: 0.25 seconds)"])
     end
 end

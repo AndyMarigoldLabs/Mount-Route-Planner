@@ -95,6 +95,23 @@ function P:ValidateRegistry()
         chain.invalid = not ok or nil
         if not ok then errors[#errors + 1] = id .. ": " .. tostring(err) end
     end
+    for id, group in pairs(self.dailyGroups or {}) do
+        local ok, err = pcall(function()
+            assert(type(group.evidence) == "string" and group.evidence ~= "", "Missing daily evidence")
+            assert(validID(group.npcID) and location(group), "Invalid daily giver")
+            assert(type(group.quests) == "table" and #group.quests > 0, "Empty daily group")
+            for _, q in ipairs(group.quests) do
+                assert(validID(q.questID) and q.scope == "character" and q.daily, "Invalid daily quest")
+                assert(location(q.turnIn), "Invalid daily turn-in")
+                if q.objective then assert(location(q.objective), "Invalid daily objective") end
+            end
+            local context = { nodes = {} }
+            if group.requires then visit(group.requires, context, {}, 0) end
+            if group.prepare then visit(group.prepare, context, {}, 0) end
+        end)
+        group.invalid = not ok or nil
+        if not ok then errors[#errors + 1] = id .. ": " .. tostring(err) end
+    end
     table.sort(errors)
     self.validationErrors = errors
     return #errors == 0, errors
@@ -142,11 +159,21 @@ function P:ResolveRequirement(req, chain, depth)
             if onQuest(quest.questID) and quest.progress and not (C_QuestLog.IsComplete and C_QuestLog.IsComplete(quest.questID)) then
                 local progress = self:Evaluate(quest.progress)
                 if progress ~= true then
+                    local dailies = progress == false and self.ResolveDailyProgress and self:ResolveDailyProgress(quest.progress, quest)
+                    if dailies then
+                        dailies.active = true
+                        dailies.message = (quest.waitMessage or self:Describe(quest.progress)) .. (dailies.message and "\n" .. dailies.message or "")
+                        return dailies
+                    end
                     return result(progress == nil and "unknown" or "waiting", quest.waitMessage or self:Describe(quest.progress), nil, true)
                 end
             end
             return result("actionable", nil, { quest }, onQuest(quest.questID))
         end
+    end
+    if met == false and self.ResolveDailyProgress then
+        local dailies = self:ResolveDailyProgress(req)
+        if dailies then return dailies end
     end
     return result(met == nil and "unknown" or "waiting", self:Describe(req))
 end

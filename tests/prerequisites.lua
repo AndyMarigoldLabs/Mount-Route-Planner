@@ -22,6 +22,9 @@ end
 
 local completed, account, accepted, objectives, waypoints, collected, timers, frames
 local standing, faction, combat, displayUpdates, race, class, reputations, items
+local serverNow, serverReset, resetKnown, resetTimers, gossipNPC, gossipQuests, detailQuest
+function GetServerTime() return serverNow end
+C_DateAndTime = { GetSecondsUntilDailyReset = function() return resetKnown and math.max(0, serverReset - serverNow) or nil end }
 WOW_PROJECT_ID, WOW_PROJECT_MAINLINE = 1, 1
 format = string.format
 FACTION_STANDING_LABEL7, FACTION_STANDING_LABEL8 = "Revered", "Exalted"
@@ -38,6 +41,12 @@ function CreateFrame()
     return frame
 end
 C_Timer = { After = function(_, callback) timers[#timers + 1] = callback end }
+C_Timer.NewTimer = function(delay, callback)
+    local timer = { delay = delay, callback = callback }
+    function timer:Cancel() self.cancelled = true end
+    resetTimers[#resetTimers + 1] = timer
+    return timer
+end
 local function flush()
     local pending = timers
     timers = {}
@@ -72,9 +81,11 @@ loadRuntime("MRP_Enums.lua")
 loadRuntime("MRP_Util.lua")
 loadRuntime("MRP_Prerequisites.lua")
 loadRuntime("MRP_Unlocks.lua")
+loadRuntime("MRP_Dailies.lua")
 loadRuntime("Data/MRP_PrerequisiteData.lua")
 loadRuntime("Data/MRP_UnlockNetherwing.lua")
 loadRuntime("Data/MRP_UnlockTournament.lua")
+loadRuntime("Data/MRP_UnlockDailies.lua")
 loadRuntime("MRP_UnlockRouting.lua")
 MRP.Data = { VERSION = 1, STEPS = {}, OPEN_WORLD = {}, DUNGEONS = {}, RAIDS = {}, WORLD_BOSSES = {} }
 MRP.UI = { UpdateDisplay = function() displayUpdates = (displayUpdates or 0) + 1 end }
@@ -92,6 +103,9 @@ local function reset()
     completed, account, accepted, objectives, waypoints, collected, timers = {}, {}, {}, {}, {}, {}, {}
     standing, faction, combat, displayUpdates = 4, "Alliance", false, 0
     race, class, reputations, items = "Human", "WARRIOR", {}, {}
+    serverNow, serverReset, resetKnown, resetTimers = 10000, 20000, true, {}
+    gossipNPC, gossipQuests, detailQuest = nil, {}, nil
+    P.dailyTimer, P.dailyOffers, P.dailyResetAt = nil, {}, nil
     loadRuntime("MRP_CharacterSettings.lua")
     MRP_CharacterSettings.filter.sourceTypes.Vendor = true
     MRP_CharacterSettings.filter.holidays.none = true
@@ -388,7 +402,7 @@ local function expand(steps)
 end
 local function questIDs(steps)
     local ids = {}
-    for _, step in ipairs(steps) do if step.prerequisiteQuest then ids[step.prerequisiteQuest.questID] = true end end
+    for _, step in ipairs(steps) do if step.prerequisiteQuest and step.prerequisiteQuest.questID then ids[step.prerequisiteQuest.questID] = true end end
     return ids
 end
 
@@ -798,6 +812,325 @@ if arg[1] then
         equal(R:IsRouteValid(), true)
     end)
 end
+
+-- Exercise daily loops through the same filter, events and timer as the addon.
+local function dailySetup(kind)
+    reset()
+    UnitGUID = function() return gossipNPC and ("Creature-0-0-0-0-" .. gossipNPC .. "-0000000000") end
+    C_GossipInfo = { GetAvailableQuests = function() return gossipQuests end }
+    GetQuestID = function() return detailQuest end
+    MRP_CharacterSettings.filter.sourceTypes.Quest = true
+    MRP.Data.STEPS = { kind == "netherwing" and source(710, "Quest", nil, 32857) or source(711, "Vendor", 33307, 45125) }
+    if kind == "netherwing" then completed[11014], completed[11019] = true, true
+    else accepted[13672] = true end
+    P:SetDailiesEnabled(true)
+end
+local function offer(groupID, ids)
+    gossipNPC, gossipQuests = P.dailyGroups[groupID].npcID, {}
+    for _, id in ipairs(ids) do gossipQuests[#gossipQuests + 1] = { questID = id } end
+    frames[1].scripts.OnEvent(nil, "GOSSIP_SHOW"); flush()
+    gossipNPC = nil
+end
+local function turnIn(id)
+    accepted[id], objectives[id] = nil, nil
+    frames[1].scripts.OnEvent(nil, "QUEST_TURNED_IN", id); flush()
+end
+local function nextDay()
+    serverNow, serverReset = serverReset + 1, serverReset + 86400
+    for id in pairs(P.dailyQuests) do completed[id] = nil end -- simulate the server's daily flags
+    local timer = P.dailyTimer
+    assert(timer and not timer.cancelled, "reset watch missing")
+    timer.callback(); flush()
+end
+local function dailyChecks(route)
+    local checks = {}
+    for _, step in ipairs(route) do
+        if step.prerequisiteQuest and step.prerequisiteQuest.dailyGroup then checks[step.prerequisiteQuest.dailyGroup] = step end
+    end
+    return checks
+end
+
+test("daily opt-in migrates off, enables the unlock path, and cancels its timer when disabled", function()
+    reset(); equal(MRP_CharacterSettings.includePrerequisiteDailies, false)
+    MRP_CharacterSettings.includePrerequisiteDailies = nil
+    MRP.Core:InitializeSettings(); equal(MRP_CharacterSettings.includePrerequisiteDailies, false)
+    dailySetup("netherwing")
+    assert(MRP_CharacterSettings.includePrerequisiteQuests and P.dailyTimer)
+    equal(#F.filteredSteps, 2)
+    local timer = P.dailyTimer
+    P:SetDailiesEnabled(false)
+    equal(#F.filteredSteps, 0); assert(timer.cancelled)
+    P:SetDailiesEnabled(true); timer = P.dailyTimer
+    P:SetEnabled(false); assert(timer.cancelled); equal(#F.filteredSteps, 0)
+end)
+
+test("Netherwing dailies require service and route their own one-time prerequisites", function()
+    dailySetup("netherwing"); completed[11019] = nil; F:Apply()
+    local ids = questIDs(F.filteredSteps)
+    assert(ids[11019]); assert(dailyChecks(F.filteredSteps)["netherwing.daily.crystals"])
+    assert(not dailyChecks(F.filteredSteps)["netherwing.daily.yarzill"])
+    completed[11014] = nil; completed[10870] = true; F:Apply()
+    equal(#F.filteredSteps, 1); equal(currentQuest(), 11012)
+end)
+
+test("Netherwing rank promotions open the confirmed daily branches through Exalted", function()
+    dailySetup("netherwing")
+    completed[11053], reputations[1015] = true, 5; F:Apply()
+    local ids = questIDs(F.filteredSteps)
+    assert(ids[11075] and ids[11054]); equal(#F.filteredSteps, 4, "shared mines introduction appears once")
+    completed[11075], completed[11054] = true, true; F:Apply()
+    equal(#F.filteredSteps, 5)
+    assert(not dailyChecks(F.filteredSteps)["netherwing.daily.portal"])
+    completed[11084], reputations[1015] = true, 6; F:Apply(); equal(#F.filteredSteps, 6)
+    completed[11092], reputations[1015] = true, 7; F:Apply(); equal(#F.filteredSteps, 6)
+    reputations[1015] = 8; F:Apply(); equal(#F.filteredSteps, 1); equal(currentQuest(), 11107)
+    completed[11107] = true; F:Apply(); equal(currentQuest(), 11108)
+    completed[11108] = true; F:Apply(); equal(currentQuest(), 11111)
+end)
+
+test("daily visits deduplicate shared mount goals and preserve selected source attribution", function()
+    dailySetup("netherwing")
+    MRP.Data.STEPS[2] = source(712, "Quest", nil, 32862); F:Apply()
+    equal(#F.filteredSteps, 2)
+    for _, step in ipairs(F.filteredSteps) do
+        equal(#step.mounts, 2); assert(step.targetStepIDs[710] and step.targetStepIDs[712])
+        assert(not MRP.Core:ShouldSkipStep(step)); assert(not MRP.Core:IsEncounterDefeated(step.mounts[1], step.source))
+        equal(P:GetNavigationEntry(step).mapID, 104)
+    end
+    collected[710], collected[712] = true, true; F:Apply(); equal(#F.filteredSteps, 0)
+    collected[710], collected[712] = nil, nil
+    F:SetSourceType("Quest", false); equal(#F.filteredSteps, 0)
+end)
+
+test("gossip resolves daily visits into only actually offered quests", function()
+    dailySetup("netherwing")
+    offer("netherwing.daily.yarzill", { 11035 })
+    local ids = questIDs(F.filteredSteps)
+    assert(ids[11035] and not ids[11020]); equal(#F.filteredSteps, 2)
+    offer("netherwing.daily.crystals", {})
+    equal(#F.filteredSteps, 1); equal(currentQuest(), 11035)
+    -- A single quest detail proves only that quest, not a complete NPC list.
+    P.dailyOffers = {}; detailQuest = 11020
+    frames[1].scripts.OnEvent(nil, "QUEST_DETAIL"); flush()
+    assert(questIDs(F.filteredSteps)[11020]); assert(dailyChecks(F.filteredSteps)["netherwing.daily.yarzill"])
+end)
+
+test("Aspirant weapon rotation never invents three simultaneous offers or a second weapon reward", function()
+    dailySetup("tournament"); equal(#F.filteredSteps, 3)
+    local group = "argent.daily.aspirant.Alliance.weapon"
+    offer(group, { 13669 })
+    local ids = questIDs(F.filteredSteps)
+    assert(ids[13669] and not ids[13666] and not ids[13670])
+    accepted[13669] = true; P:QueueRefresh(); flush()
+    assert(questIDs(F.filteredSteps)[13669]); assert(not dailyChecks(F.filteredSteps)[group])
+    turnIn(13669)
+    equal(#F.filteredSteps, 2); assert(not dailyChecks(F.filteredSteps)[group])
+    nextDay(); equal(#F.filteredSteps, 3)
+    offer(group, { 13670 }); assert(questIDs(F.filteredSteps)[13670])
+end)
+
+test("daily objectives use native waypoints, turn-in fallback and no invented objective location", function()
+    dailySetup("netherwing"); accepted[11035] = true
+    waypoints[11035] = { 104, 0.72, 0.81 }; F:Apply()
+    local q = P.dailyQuests[11035]
+    local location, phase = P:GetQuestDestination(q)
+    equal(phase, "objective"); equal(location.x, 72)
+    waypoints[11035] = nil; equal(P:GetQuestDestination(q), nil)
+    objectives[11035] = true
+    location, phase = P:GetQuestDestination(q); equal(phase, "turnIn"); equal(location.x, 65.9)
+    turnIn(11035); equal(P:GetQuestDestination(q), nil)
+end)
+
+test("completed dailies stay suppressed across reload, but expire after an offline reset", function()
+    dailySetup("netherwing"); turnIn(11015)
+    equal(completed[11015], nil, "test simulates a delayed Blizzard completion flag")
+    P.dailyOffers, P.dailyResetAt = {}, nil -- session observations are not saved
+    P:StartDailyResetWatch(); F:Apply()
+    assert(not dailyChecks(F.filteredSteps)["netherwing.daily.crystals"])
+    serverNow, serverReset = serverReset + 100000, serverReset + 172800 -- login more than a day later
+    P.dailyOffers, P.dailyResetAt = {}, nil; P:StartDailyResetWatch(); F:Apply()
+    assert(dailyChecks(F.filteredSteps)["netherwing.daily.crystals"])
+    assert(completed[11014] and completed[11019], "permanent history survives")
+    equal(MRP_CharacterSettings.prerequisiteDailyState.completed[11015], nil)
+end)
+
+test("online reset refreshes empty routes and expires positive and negative offers", function()
+    dailySetup("netherwing")
+    offer("netherwing.daily.crystals", { 11015 })
+    offer("netherwing.daily.yarzill", {})
+    turnIn(11015); equal(#F.filteredSteps, 0)
+    equal(P.diagnostics[1].status.state, "waiting")
+    nextDay(); equal(#F.filteredSteps, 2); equal(next(P.dailyOffers), nil)
+    offer("netherwing.daily.crystals", { 11015 })
+    nextDay(); assert(dailyChecks(F.filteredSteps)["netherwing.daily.crystals"])
+end)
+
+test("the reset watch defers UI work during combat and refreshes on regeneration", function()
+    dailySetup("netherwing"); turnIn(11015); turnIn(11020); turnIn(11035)
+    equal(#F.filteredSteps, 0)
+    combat = true; nextDay(); equal(#F.filteredSteps, 0); assert(P.refreshAfterCombat)
+    combat = false; frames[1].scripts.OnEvent(nil, "PLAYER_REGEN_ENABLED"); flush()
+    equal(#F.filteredSteps, 2)
+end)
+
+test("accepted dailies survive reset and retain their objective or ready turn-in", function()
+    dailySetup("tournament"); accepted[13669] = true; objectives[13669] = true; F:Apply()
+    local oldID
+    for _, step in ipairs(F.filteredSteps) do if step.prerequisiteQuest.questID == 13669 then oldID = step.id end end
+    nextDay()
+    local found
+    for _, step in ipairs(F.filteredSteps) do
+        if step.prerequisiteQuest.questID == 13669 then
+            found = true; assert(step.id ~= oldID)
+            local _, phase = P:GetQuestDestination(step.prerequisiteQuest); equal(phase, "turnIn")
+        end
+    end
+    assert(found); assert(not dailyChecks(F.filteredSteps)["argent.daily.aspirant.Alliance.weapon"])
+end)
+
+test("auto-advance off retains today's completed daily but never yesterday's stop", function()
+    dailySetup("netherwing"); offer("netherwing.daily.crystals", { 11015 })
+    for i, step in ipairs(F.filteredSteps) do if step.prerequisiteQuest.questID == 11015 then MRP_CharacterSettings.currentStep = i end end
+    MRP_CharacterSettings.autoAdvance = false
+    local oldID = F:GetCurrentStep().id
+    turnIn(11015); equal(F:GetCurrentStep().id, oldID); assert(MRP.Core:ShouldSkipStep(F:GetCurrentStep()))
+    nextDay()
+    for _, step in ipairs(F.filteredSteps) do assert(step.id ~= oldID) end
+    assert(dailyChecks(F.filteredSteps)["netherwing.daily.crystals"])
+end)
+
+test("unknown reset APIs fail closed for new dailies but preserve accepted quests", function()
+    dailySetup("netherwing"); resetKnown = false; accepted[11020] = true; F:Apply()
+    equal(#F.filteredSteps, 1); equal(currentQuest(), 11020)
+    accepted[11020] = nil; F:Apply(); equal(#F.filteredSteps, 0)
+    assert(P.diagnostics[1].status.message:find("Daily reset time is unavailable", 1, true))
+    resetKnown = true; P.dailyTimer.callback(); flush(); equal(#F.filteredSteps, 2)
+end)
+
+test("server clock drift is tolerated but changed reset schedules invalidate cached daily state", function()
+    dailySetup("netherwing"); turnIn(11015)
+    serverReset = serverReset + 1; F:Apply()
+    assert(not dailyChecks(F.filteredSteps)["netherwing.daily.crystals"])
+    serverReset = serverReset + 3600; F:Apply()
+    assert(dailyChecks(F.filteredSteps)["netherwing.daily.crystals"])
+    local state = MRP_CharacterSettings.prerequisiteDailyState
+    state.resetAt = "invalid"; F:Apply(); equal(type(state.resetAt), "string")
+    equal(type(MRP_CharacterSettings.prerequisiteDailyState.resetAt), "number")
+end)
+
+test("empty NPC snapshots are invalidated after permanent unlock and reputation changes", function()
+    dailySetup("netherwing"); offer("netherwing.daily.yarzill", {})
+    assert(not dailyChecks(F.filteredSteps)["netherwing.daily.yarzill"])
+    frames[1].scripts.OnEvent(nil, "UPDATE_FACTION"); flush()
+    assert(dailyChecks(F.filteredSteps)["netherwing.daily.yarzill"])
+    offer("netherwing.daily.yarzill", {})
+    frames[1].scripts.OnEvent(nil, "QUEST_TURNED_IN", 11053); flush()
+    assert(dailyChecks(F.filteredSteps)["netherwing.daily.yarzill"])
+end)
+
+test("abandoning a daily returns to its giver without undoing unlocks", function()
+    dailySetup("netherwing"); accepted[11020] = true; F:Apply(); assert(questIDs(F.filteredSteps)[11020])
+    accepted[11020] = nil; frames[1].scripts.OnEvent(nil, "QUEST_REMOVED", 11020); flush()
+    assert(dailyChecks(F.filteredSteps)["netherwing.daily.yarzill"]); assert(completed[11014])
+end)
+
+test("a seal threshold immediately stops gathering and resumes the actual charge", function()
+    dailySetup("tournament"); accepted[13625] = true
+    items[45192] = 15; frames[1].scripts.OnEvent(nil, "BAG_UPDATE_DELAYED"); flush()
+    equal(#F.filteredSteps, 1); equal(currentQuest(), 13672)
+    items[45192] = 0; objectives[13672] = true; F:Apply(); equal(currentQuest(), 13672)
+end)
+
+test("all faction and city seal loops finish across resets without offering another city's quests", function()
+    local cases = {
+        { faction = "Alliance", charge = 13672, item = 45192, target = 15, challenge = 13679 },
+        { faction = "Horde", charge = 13678, item = 45192, target = 15, challenge = 13680 },
+    }
+    for _, city in ipairs(P.tournamentCities) do
+        cases[#cases + 1] = { faction = city.faction, charge = city[6], item = 44987, target = 25, challenge = city[7], city = city }
+    end
+    for _, case in ipairs(cases) do
+        dailySetup("tournament"); accepted = { [case.charge] = true }; faction = case.faction
+        race = faction == "Alliance" and "Human" or "Orc"
+        local city = case.city
+        MRP.Data.STEPS = { source(711, "Vendor", city and city[2] or (faction == "Alliance" and 33307 or 33553), 1) }
+        if city then completed[city[4]] = true end
+        F:Apply()
+        for day = 1, case.target / 5 do
+            equal(#F.filteredSteps, 3, "three daily givers for the active charge")
+            local groups = P.sealDailyGroups[case.charge]
+            for _, id in ipairs(groups) do
+                local g, offers = P.dailyGroups[id], {}
+                equal(g.faction, case.faction)
+                for i, q in ipairs(g.quests) do if not g.rotation or i == (day % 3 + 1) then offers[#offers + 1] = q.questID end end
+                offer(id, offers)
+                for _, questID in ipairs(offers) do
+                    assert(questIDs(F.filteredSteps)[questID], "offered daily missing: " .. questID .. " charge " .. case.charge .. " day " .. day)
+                    items[case.item] = (items[case.item] or 0) + (g.rotation and 2 or (id:find("reins", 1, true) and 2 or 1))
+                    turnIn(questID)
+                end
+            end
+            if day < case.target / 5 then equal(#F.filteredSteps, 0); nextDay() end
+        end
+        equal(items[case.item], case.target); equal(#F.filteredSteps, 1); equal(currentQuest(), case.charge)
+        completed[case.charge], accepted[case.charge], items[case.item] = true, nil, 0
+        F:Apply(); equal(currentQuest(), case.challenge)
+        completed[case.challenge] = true; F:Apply()
+        if city then equal(F:GetCurrentStep().source.type, "Vendor") end
+    end
+end)
+
+test("current daily offers override lagging completion flags, including the old weapon rotation", function()
+    dailySetup("tournament")
+    completed[13666], completed[13669] = true, true
+    offer("argent.daily.aspirant.Alliance.weapon", { 13669 })
+    assert(questIDs(F.filteredSteps)[13669]); assert(not questIDs(F.filteredSteps)[13666])
+    equal(P:GetQuestDestination(P.dailyQuests[13669]).mapID, 118)
+    turnIn(13669); assert(not questIDs(F.filteredSteps)[13669])
+end)
+
+test("accepted Netherwing dailies do not replay their historical setup", function()
+    dailySetup("netherwing"); completed[11019] = nil; accepted[11020] = true; F:Apply()
+    assert(questIDs(F.filteredSteps)[11020]); assert(not questIDs(F.filteredSteps)[11019])
+end)
+
+test("multiple Tournament mount goals share dailies and account flags cannot finish them", function()
+    dailySetup("tournament")
+    MRP.Data.STEPS[2] = source(712, "Vendor", 33310, 1)
+    MRP.Data.STEPS[3] = source(713, "Vendor", 33310, 45725)
+    F:Apply(); equal(#F.filteredSteps, 3)
+    for _, step in ipairs(F.filteredSteps) do equal(#step.mounts, 3) end
+    account[13669] = true; offer("argent.daily.aspirant.Alliance.weapon", { 13669 })
+    assert(questIDs(F.filteredSteps)[13669])
+end)
+
+test("daily turn-ins are isolated per character and live daily flags are respected after login", function()
+    dailySetup("netherwing"); turnIn(11015)
+    local firstCharacter = MRP_CharacterSettings
+    dailySetup("netherwing"); assert(dailyChecks(F.filteredSteps)["netherwing.daily.crystals"])
+    completed[11015] = true; F:Apply()
+    assert(not dailyChecks(F.filteredSteps)["netherwing.daily.crystals"])
+    equal(firstCharacter.prerequisiteDailyState.completed[11015], true)
+    equal(MRP_CharacterSettings.prerequisiteDailyState.completed[11015], nil)
+end)
+
+test("daily metadata validation rejects bad givers and broken preparation chains", function()
+    local group = P.dailyGroups["netherwing.daily.crystals"]
+    local npc, preparation = group.npcID, group.prepare
+    group.npcID = 0; equal(P:ValidateRegistry(), false); assert(group.invalid)
+    group.npcID, group.prepare = npc, P.RequireChain("missing.daily.chain")
+    equal(P:ValidateRegistry(), false)
+    group.prepare = preparation; equal(P:ValidateRegistry(), true); equal(group.invalid, nil)
+end)
+
+test("daily opt-in cannot bypass class, faction, unknown source gates or change Classic routing", function()
+    dailySetup("tournament"); MRP.Data.STEPS = { source(711, "Vendor", 34885, 47179) }; F:Apply(); equal(#F.filteredSteps, 0)
+    MRP.Data.STEPS = { source(711, "Vendor", 33553, 1) }; F:Apply(); equal(#F.filteredSteps, 0)
+    MRP.Data.STEPS = { source(711, "Vendor", 33307, 1) }; MRP.Data.STEPS[1].requirements = { type = "unknown" }
+    F:Apply(); equal(#F.filteredSteps, 0)
+    MRP.Data.STEPS[1].requirements = nil
+    WOW_PROJECT_ID = 2; F:Apply(); equal(F:GetCurrentStep().source.type, "Vendor"); WOW_PROJECT_ID = 1
+end)
 
 print(string.format("%d tests, %d failures", tests, failures))
 os.exit(failures == 0 and 0 or 1)
