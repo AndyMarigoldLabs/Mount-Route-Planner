@@ -23,7 +23,8 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 $runtimeFiles = @(
     'MRP_CharacterSettings.lua', 'MRP_Core.lua', 'MRP_Filter.lua', 'MRP_Map.lua',
     'MRP_Options.lua', 'MRP_Route.lua', 'MRP_UI.lua', 'MRP_Util.lua',
-    'MRP_Prerequisites.lua', 'Data\MRP_PrerequisiteData.lua', 'Locale\MRP_Locale.enUS.lua'
+    'MRP_Prerequisites.lua', 'MRP_Unlocks.lua', 'MRP_UnlockRouting.lua',
+    'Data\MRP_PrerequisiteData.lua', 'Data\MRP_UnlockNetherwing.lua', 'Data\MRP_UnlockTournament.lua', 'Locale\MRP_Locale.enUS.lua'
 )
 foreach ($relative in $runtimeFiles) {
     $source = Join-Path $repoRoot $relative
@@ -37,7 +38,7 @@ foreach ($relative in $runtimeFiles) {
 }
 $tocPath = Join-Path $addonRoot 'MountRoutePlanner.toc'
 $toc = [IO.File]::ReadAllText($tocPath)
-$toc = $toc.Replace('MRP_Util.lua', "MRP_Util.lua`nMRP_Prerequisites.lua`nData\MRP_PrerequisiteData.lua")
+$toc = $toc.Replace('MRP_Util.lua', "MRP_Util.lua`nMRP_Prerequisites.lua`nMRP_Unlocks.lua`nData\MRP_PrerequisiteData.lua`nData\MRP_UnlockNetherwing.lua`nData\MRP_UnlockTournament.lua`nMRP_UnlockRouting.lua")
 $toc = $toc.Replace('## Version: v2.4.5', '## Version: v2.4.5-quest-dev')
 [IO.File]::WriteAllText($tocPath, $toc, $utf8)
 $archive = Join-Path $outputRoot 'MountRoutePlanner-quest-dev.zip'

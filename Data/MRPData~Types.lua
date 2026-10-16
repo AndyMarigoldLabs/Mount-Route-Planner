@@ -14,8 +14,10 @@ if not MRPData.Internal then return end
 ---@field unlockSteps UnlockQuest[]? ordered quests that satisfy this entry's requirements
 
 ---@class AcquisitionRequirement
----@field type "quest"|"reputation"? leaf requirement type
----@field id number? quest ID
+---@field type "quest"|"reputation"|"chain"|"item"? leaf requirement type
+---@field id number|string? quest/item ID or stable chain key
+---@field count number? carried item quantity (item requirements)
+---@field checkOnly boolean? terminal quest flag with no authored action in this graph
 ---@field name string? fallback quest name
 ---@field scope "character"|"account"? quest completion scope (defaults to character)
 ---@field factionID number? reputation faction ID
@@ -34,10 +36,19 @@ if not MRPData.Internal then return end
 ---@field scope "character"|"account"? defaults to character
 ---@field faction "Alliance"|"Horde"? omit for both
 ---@field requires AcquisitionRequirement? dependency gate for this quest
+---@field progress AcquisitionRequirement? gathering gate for an accepted quest
+---@field waitMessage string? explains how to progress when gathering is incomplete
 ---@field accept QuestLocation? overrides the top-level quest-giver coordinates
 ---@field objective QuestLocation? fallback when Blizzard has no active waypoint
 ---@field turnIn QuestLocation? fallback for a finished quest awaiting turn-in
 ---@field note string? quest-specific instructions
+
+---@class UnlockChain
+---@field requirements AcquisitionRequirement terminal condition; satisfied terminals bypass history
+---@field quests UnlockQuest[] graph nodes (dependencies explicitly declared)
+---@field evidence string source URL for reviewed identifiers and dependencies
+---@field nodes table<string, UnlockQuest> derived scope/quest-ID index
+---@field invalid boolean? set by registry validation; invalid chains fail closed
 
 ---@class Dungeon : BaseEntry
 ---@field instanceId number the instanceID (mapID)
@@ -126,6 +137,7 @@ if not MRPData.Internal then return end
 
 ---@class StepSource
 ---@field prerequisiteQuest UnlockQuest? present only on runtime prerequisite steps
+---@field runtimeEntry BaseEntry? location/lockout metadata for a runtime source replacement
 ---@field type FilterSourceType the type of the source
 ---@field name string the name of the source
 ---@field npcID number? the npcID used for nearby detection when available
@@ -136,6 +148,9 @@ if not MRPData.Internal then return end
 ---@field requirements AcquisitionRequirement? additional source requirements
 ---@field unlockSteps UnlockQuest[]? ordered unlock quests
 ---@field prerequisiteQuest UnlockQuest? current prerequisite, if this is a runtime quest stop
+---@field acquisitionQuest UnlockQuest? active repeatable reward quest, not permanent unlock progress
+---@field runtimeLocation boolean? re-order using current location instead of the saved source position
+---@field unlockRequirement AcquisitionRequirement? actionable path independent of purchase gates
 ---@field targetStepIDs table<number, boolean>? source steps unlocked by this quest
 ---@field entry BaseEntry? runtime location; not written into generated source tables
 ---@field mounts Mount[] the list of mounts in this step

@@ -63,7 +63,7 @@ end
 function Route:ApplyToFilteredSteps()
     local steps = MRP.Filter.filteredSteps
     for _, step in ipairs(steps) do
-        if step.prerequisiteQuest then
+        if step.prerequisiteQuest or step.runtimeLocation then
             MRP.Filter.filteredSteps = self:OrderSteps(steps)
             return
         end

@@ -53,11 +53,29 @@ for _, row in ipairs(rows) do
     }
 end
 
+local P = MRP.Prerequisites
+local Q, C = P.RequireQuest, P.RequireChain
+local evidence = "https://github.com/DFortun81/AllTheThings/blob/master/.contrib/.db/standard/02%20-%20Outdoor%20Zones/04%20Northrend/The%20Storm%20Peaks.lua"
+local hyldnir, hodir = {}, {}
+for index, quest in ipairs(chain) do
+    if index > 1 then quest.requires = Q(chain[index - 1].questID) end
+    if index <= 22 then hyldnir[#hyldnir + 1] = quest else hodir[#hodir + 1] = quest end
+end
+hodir[1].requires = C("storm.hyldnir")
+-- The item-started Refiner's Fire can be done alongside Mending Fences.
+hodir[3].requires = Q(13064)
+P:RegisterChain("storm.hyldnir", { evidence = evidence, requirements = Q(12886), quests = hyldnir })
+P:RegisterChain("storm.hodir", { evidence = evidence,
+    requirements = { allOf = { Q(12915), Q(12956) } }, quests = hodir })
+local crone = Q(12841); crone.checkOnly = true
+P:RegisterChain("storm.gretta", { evidence = evidence,
+    requirements = { allOf = { C("storm.hyldnir"), Q(12925) } },
+    quests = { { questID = 12925, scope = "character", name = "Aberrations", requires = crone,
+        mapID = 120, x = 48.4, y = 72.1, objective = location(23.1, 58.3), turnIn = location(48.4, 72.1),
+        note = "Collect Frost Oil from Valkyrion Aspirants and use it on the eggs in the Blighted Pool. This unlocks the Aberrations daily in Gretta's rotation." } },
+})
 local lillehoff = {
-    requirements = { allOf = {
-        { type = "quest", id = 12915, name = "Mending Fences" },
-        { type = "quest", id = 12956, name = "A Spark of Hope" },
-    } },
+    requirements = C("storm.hodir"),
     unlockSteps = chain,
 }
 local rewards = {
@@ -67,11 +85,5 @@ local rewards = {
     [44086] = { faction = "Horde", requirements = { type = "reputation", factionID = 1119, standing = 8 } },
 }
 
-function MRP.Prerequisites:GetSupplement(step, mount)
-    if WOW_PROJECT_ID ~= WOW_PROJECT_MAINLINE then return nil end
-    local entry = MRP.Util.GetStepEntry(step)
-    if step.source.type == MRP.FilterSourceType.Vendor
-        and (step.source.npcID == 32540 or (entry and entry.npcID == 32540)) then
-        return lillehoff, rewards[mount.itemId]
-    end
-end
+P:RegisterBinding({ sourceType = "Vendor", npcID = 32540, source = lillehoff, rewards = rewards })
+P:RegisterBinding({ sourceType = "OpenWorld", itemID = 43962, source = { requirements = C("storm.gretta") } })

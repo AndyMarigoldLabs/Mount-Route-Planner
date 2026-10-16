@@ -1,7 +1,8 @@
 # Mount Route Planner (MRP)
 
-This fork adds opt-in prerequisite quest routing, initially covering Lillehoff's
-Sons of Hodir unlock chain and the Ice Mammoth purchase requirements. Enable
+This fork adds opt-in prerequisite quest routing for Storm Peaks (Lillehoff and
+Gretta), Netherwing, and the Argent Tournament. Shared quest chains appear once;
+city, faction, class, and reputation requirements apply to the appropriate mounts. Enable
 **Include prerequisite quest chains** in Settings or run `/mrp prerequisites on`.
 See [prerequisite routing](docs/prerequisites.md) for coverage, testing and local
 build instructions.

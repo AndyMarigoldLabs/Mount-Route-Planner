@@ -153,7 +153,7 @@ function Core:IsEncounterDefeated(mount, source, difficultyId)
     end
 
     if source.type == MRP.FilterSourceType.OpenWorld or source.type == MRP.FilterSourceType.Quest or source.type == MRP.FilterSourceType.Treasure or source.type == MRP.FilterSourceType.Vendor then
-        local entry = MRP.Data.OPEN_WORLD[source.name]
+        local entry = source.runtimeEntry or MRP.Data.OPEN_WORLD[source.name]
         if not entry then
             print(string.format(L["|cffff0000[MRP]|r Unknown world boss: %s"], source.name))
             return false
@@ -907,14 +907,17 @@ watcher:RegisterEvent("QUEST_ACCEPTED")
 watcher:RegisterEvent("QUEST_REMOVED")
 watcher:RegisterEvent("UPDATE_FACTION")
 watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+watcher:RegisterEvent("GOSSIP_SHOW")
+watcher:RegisterEvent("GOSSIP_CLOSED")
 watcher:SetScript("OnEvent", function(_, event)
     if event == "QUEST_TURNED_IN" or event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED"
         or event == "QUEST_REMOVED" or event == "UPDATE_FACTION"
+        or event == "GOSSIP_SHOW" or event == "GOSSIP_CLOSED"
         or (event == "PLAYER_REGEN_ENABLED" and MRP.Prerequisites.refreshAfterCombat) then
         MRP.Prerequisites:QueueRefresh()
         return
     end
-    if event == "NEW_MOUNT_ADDED" or event == "MERCHANT_CLOSED" then MRP.Prerequisites:QueueRefresh() end
+    if event == "NEW_MOUNT_ADDED" or event == "MERCHANT_CLOSED" or event == "BAG_UPDATE_DELAYED" then MRP.Prerequisites:QueueRefresh() end
     local current = MRP.Filter:GetCurrentStep()
     if current and current.prerequisiteQuest and Core:ShouldSkipStep(current) then
         MRP.Prerequisites:QueueRefresh()

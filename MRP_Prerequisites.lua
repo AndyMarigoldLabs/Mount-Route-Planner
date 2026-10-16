@@ -38,6 +38,15 @@ function Prerequisites:Evaluate(requirement, depth)
         end
         if unknown then return nil end
         return requirement.allOf ~= nil
+    elseif requirement.type == "chain" then
+        local chain = self.chains and self.chains[requirement.id]
+        if not chain or chain.invalid then return nil end
+        return self:Evaluate(chain.requirements, depth)
+    elseif requirement.type == "item" then
+        if not validID(requirement.id) or not validID(requirement.count) or not (C_Item and C_Item.GetItemCount) then return nil end
+        local count = C_Item.GetItemCount(requirement.id, false)
+        if type(count) ~= "number" then return nil end
+        return count >= requirement.count
     elseif requirement.type == "quest" then
         return self:IsQuestComplete(requirement.id, requirement.scope)
     elseif requirement.type == "reputation" then
@@ -60,6 +69,11 @@ function Prerequisites:Describe(requirement, depth)
             if self:Evaluate(child) ~= true then parts[#parts + 1] = self:Describe(child, depth) end
         end
         return table.concat(parts, requirement.anyOf and L[" OR "] or "; ")
+    elseif requirement.type == "chain" then
+        local chain = self.chains and self.chains[requirement.id]
+        return chain and self:Describe(chain.requirements, depth) or L["Prerequisite data is unknown."]
+    elseif requirement.type == "item" and validID(requirement.id) and validID(requirement.count) then
+        return string.format(L["Collect %d of item %d."], requirement.count, requirement.id)
     elseif requirement.type == "quest" and validID(requirement.id) then
         return string.format(L["Complete %s (%d)."], self:GetQuestName(requirement), requirement.id)
     elseif requirement.type == "reputation" and validID(requirement.factionID) and validID(requirement.standing) then
@@ -136,6 +150,10 @@ function Prerequisites:IsMountAllowed(step, mount)
     if self.GetSupplement then
         local _, reward = self:GetSupplement(step, mount)
         if reward and reward.faction and reward.faction ~= UnitFactionGroup("player") then return false end
+        if reward and reward.class then
+            local _, class = UnitClass("player")
+            if class ~= reward.class then return false end
+        end
     end
     return true
 end
@@ -143,13 +161,18 @@ end
 function Prerequisites:GetMountAvailability(step, mount)
     local providers = self:GetProviders(step, mount)
     if #providers == 0 then return { state = "unknown", unverified = true } end
-    local state, messages, nextQuest = "available", {}, nil
+    local state, messages, nextQuests = "available", {}, {}
     for _, provider in ipairs(providers) do
         local met = self:Evaluate(provider.requirements)
         if met ~= true then
             state = met == nil and "unknown" or (state ~= "unknown" and "locked" or state)
             messages[#messages + 1] = self:Describe(provider.requirements)
-            if met == false and type(provider.unlockSteps) == "table" then
+            if met == false and (provider.unlockRequirement or provider.requirements.type == "chain") then
+                local resolved = self:ResolveRequirement(provider.unlockRequirement or provider.requirements)
+                if resolved.state == "unknown" then state = "unknown" end
+                if resolved.message and resolved.message ~= "" then messages[#messages + 1] = resolved.message end
+                for _, quest in ipairs(resolved.quests) do nextQuests[#nextQuests + 1] = quest end
+            elseif met == false and type(provider.unlockSteps) == "table" then
                 for _, quest in ipairs(provider.unlockSteps) do
                     if type(quest) ~= "table" or not validID(quest.questID) then
                         state = "unknown"
@@ -162,7 +185,7 @@ function Prerequisites:GetMountAvailability(step, mount)
                             -- Explicit dependencies support forks and quests accepted in
                             -- parallel; otherwise the list is a strictly ordered chain.
                             if not quest.requires or self:Evaluate(quest.requires) == true then
-                                nextQuest = nextQuest or quest
+                                nextQuests[#nextQuests + 1] = quest
                             end
                             break
                         end
@@ -171,7 +194,9 @@ function Prerequisites:GetMountAvailability(step, mount)
             end
         end
     end
-    return { state = state, quest = state ~= "unknown" and nextQuest or nil, message = table.concat(messages, "\n") }
+    if state == "unknown" then nextQuests = {} end
+    if state == "locked" then state = #nextQuests == 0 and "waiting" or "actionable" end
+    return { state = state, quest = nextQuests[1], quests = nextQuests, message = table.concat(messages, "\n") }
 end
 
 function Prerequisites:MakeQuestStep(quest, parent, mount)
@@ -192,9 +217,10 @@ function Prerequisites:MakeQuestStep(quest, parent, mount)
     }
 end
 
--- Only the next unfinished quest of each selected source enters the route.
+-- Only ready prerequisite quests of each selected source enter the route.
 -- Locked vendors are withheld, so geography can never put one before its unlock.
 function Prerequisites:ExpandSteps(steps)
+    if self.PrepareWaveContext then self:PrepareWaveContext(steps) end
     local result, quests, diagnostics = {}, {}, {}
     for _, step in ipairs(steps) do
         local available = {}
@@ -214,17 +240,19 @@ function Prerequisites:ExpandSteps(steps)
                     available[#available + 1] = mount
                 else
                     diagnostics[#diagnostics + 1] = { step = step, mount = mount, status = status }
-                    if MRP_CharacterSettings.includePrerequisiteQuests and status.quest and not collected then
-                        local planned = self:MakeQuestStep(status.quest, step, mount)
-                        if not quests[planned.id] then
-                            quests[planned.id] = planned
-                            result[#result + 1] = planned
-                        else
-                            local existing = quests[planned.id]
-                            existing.targetStepIDs[step.id] = true
-                            local found = false
-                            for _, reward in ipairs(existing.mounts) do if reward.id == mount.id then found = true; break end end
-                            if not found then existing.mounts[#existing.mounts + 1] = planned.mounts[1] end
+                    if MRP_CharacterSettings.includePrerequisiteQuests and not collected then
+                        for _, quest in ipairs(status.quests or {}) do
+                            local planned = self:MakeQuestStep(quest, step, mount)
+                            if not quests[planned.id] then
+                                quests[planned.id] = planned
+                                result[#result + 1] = planned
+                            else
+                                local existing = quests[planned.id]
+                                existing.targetStepIDs[step.id] = true
+                                local found = false
+                                for _, reward in ipairs(existing.mounts) do if reward.id == mount.id then found = true; break end end
+                                if not found then existing.mounts[#existing.mounts + 1] = planned.mounts[1] end
+                            end
                         end
                     end
                 end
@@ -233,15 +261,36 @@ function Prerequisites:ExpandSteps(steps)
         if #available > 0 then
             local copy = MRP.Util.ShallowCopy(step)
             copy.mounts = available
+            if self.GetRouteOverride then copy = self:GetRouteOverride(copy) end
             result[#result + 1] = copy
         end
     end
+    -- Alternate acquisition rows can converge on the same vendor after a choice.
+    local merged, byID = {}, {}
+    for _, step in ipairs(result) do
+        local existing = byID[step.id]
+        if existing then
+            for id in pairs(step.targetStepIDs or {}) do
+                existing.targetStepIDs = existing.targetStepIDs or {}
+                existing.targetStepIDs[id] = true
+            end
+            for _, reward in ipairs(step.mounts) do
+                local found = false
+                for _, old in ipairs(existing.mounts) do if old.id == reward.id then found = true; break end end
+                if not found then existing.mounts[#existing.mounts + 1] = reward end
+            end
+        else
+            byID[step.id] = step
+            merged[#merged + 1] = step
+        end
+    end
     self.diagnostics = diagnostics
-    return result
+    return merged
 end
 
 function Prerequisites:GetNavigationEntry(step)
     if step.prerequisiteQuest then return self:GetQuestDestination(step.prerequisiteQuest) end
+    if step.acquisitionQuest then return self:GetQuestDestination(step.acquisitionQuest) end
     local entry = MRP.Util.GetStepEntry(step)
     -- Existing quest-reward chains use the same resolver on the panel and map.
     if entry and step.source.type == MRP.FilterSourceType.Quest then

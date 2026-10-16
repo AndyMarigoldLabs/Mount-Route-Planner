@@ -63,7 +63,11 @@ MRP_Farstrider.lua
 
 MRP_Util.lua
 MRP_Prerequisites.lua
+MRP_Unlocks.lua
 Data\MRP_PrerequisiteData.lua
+Data\MRP_UnlockNetherwing.lua
+Data\MRP_UnlockTournament.lua
+MRP_UnlockRouting.lua
 MRP_Update.lua
 
 MRP_Filter.lua

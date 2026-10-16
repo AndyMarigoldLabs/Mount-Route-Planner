@@ -1124,11 +1124,12 @@ function UI:UpdateDisplay()
 
     local entry = MRP.Prerequisites:GetNavigationEntry(step)
 
-    if step.prerequisiteQuest then
-        local quest = step.prerequisiteQuest
+    if step.prerequisiteQuest or step.acquisitionQuest then
+        local quest = step.prerequisiteQuest or step.acquisitionQuest
         local _, phase = MRP.Prerequisites:GetQuestDestination(quest)
         local action = phase == "accept" and L["Accept"] or (phase == "turnIn" and L["Turn in"] or L["Complete objectives for"])
         local message = string.format(L["%s %s (%d) to unlock the mounts shown above."], action, MRP.Prerequisites:GetQuestName(quest), quest.questID)
+        if step.acquisitionQuest then message = string.format(L["%s %s (%d)."], action, MRP.Prerequisites:GetQuestName(quest), quest.questID) end
         if phase == "completed" then
             message = L["Quest complete. Use Next to continue."]
         else
